@@ -1,7 +1,7 @@
 Source: dku-eprint
 Section: utils
 Priority: optional
-Maintainer: Anar Nyambayar <anar.nyambayar@gmail.com>
+Maintainer: Anar Nyambayar <an301@duke.edu>
 Build-Depends: debhelper-compat (= 13)
 Standards-Version: 4.6.2
 Homepage: https://github.com/pomegranar/dku-eprint-linux

@@ -94,5 +94,5 @@ fi
 %config(noreplace) %{_sysconfdir}/%{name}/eprint.conf
 
 %changelog
-* Sat Sep 19 2026 Anar Nyambayar <anar.nyambayar@gmail.com> - 1.0.0-1
+* Sat Sep 19 2026 Anar Nyambayar <an301@duke.edu> - 1.0.0-1
 - Initial package
