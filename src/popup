@@ -8,23 +8,34 @@ invokes it as:
 
 with DEVICE_URI set to popup://<print-server>/<queue>.
 
-The macOS client pops up a window asking for the NetID.  A CUPS backend has no
-usable way to do that: it runs as the 'lp' user, detached from any session, and
-often before the user is even at the machine.  So the NetID comes from
-configuration instead -- see dku-eprint(1) and eprint.conf.
+Where the NetID comes from depends on the 'prompt' setting in eprint.conf:
+
+  prompt = never   use the stored netid (set once, at install time)
+  prompt = always  ask for every job, by handing the question to
+                   dku-eprint-agent running in the printing user's desktop
+                   session -- this backend runs as root with no session of its
+                   own, so it cannot open a window itself
+
+If the agent cannot be reached, the stored netid is used as a fallback so that
+printing keeps working when someone is logged in over SSH.
 
 Exit codes follow CUPS convention: 0 ok, 1 failed, 2 auth required, 5 retry.
 """
 
+import json
 import os
-import sys
+import pwd
 import socket
+import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__))))
-sys.path.insert(0, "/usr/share/dku-eprint")
+# Our own directory wins, so a git checkout stays self-consistent even when an
+# older copy is installed system-wide; /usr/share is the fallback for the
+# installed backend, whose modules live there.
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+sys.path.append("/usr/share/dku-eprint")
 
 import eprint_pharos as pharos
-from eprint_config import load_config, netid_for
+from eprint_config import load_config, netid_for, valid_netid
 
 CUPS_BACKEND_OK = 0
 CUPS_BACKEND_FAILED = 1
@@ -35,6 +46,56 @@ CUPS_BACKEND_RETRY_CURRENT_JOB = 5
 def log(level, msg):
     sys.stderr.write("%s: %s\n" % (level, msg))
     sys.stderr.flush()
+
+
+AGENT_SOCKET = "dku-eprint.sock"
+AGENT_TIMEOUT = 330.0
+
+
+def agent_socket_path(unix_user):
+    """The printing user's session socket, found from their uid."""
+    try:
+        uid = pwd.getpwnam(unix_user).pw_uid
+    except KeyError:
+        return None
+    return "/run/user/%d/%s" % (uid, AGENT_SOCKET)
+
+
+def ask_agent(unix_user, queue, prompt, default):
+    """Ask the user's desktop agent for a NetID.  None if unavailable."""
+    path = agent_socket_path(unix_user)
+    if not path or not os.path.exists(path):
+        log("DEBUG", "popup - no agent socket for user '%s'" % unix_user)
+        return None
+
+    request = json.dumps({"op": "ask", "queue": queue,
+                          "prompt": prompt, "default": default or ""})
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(AGENT_TIMEOUT)
+        sock.connect(path)
+        with sock:
+            sock.sendall(request.encode() + b"\n")
+            data = b""
+            while not data.endswith(b"\n") and len(data) < 65536:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+    except (OSError, socket.timeout) as exc:
+        log("WARNING", "popup - could not reach popup agent: %s" % exc)
+        return None
+
+    try:
+        reply = json.loads(data.decode("utf-8", "replace") or "{}")
+    except ValueError:
+        log("WARNING", "popup - malformed reply from popup agent")
+        return None
+
+    if reply.get("error"):
+        log("INFO", "popup - popup agent returned: %s" % reply["error"])
+        return reply  # carries 'cancelled' so the caller can abort cleanly
+    return reply
 
 
 def discovery():
@@ -128,7 +189,24 @@ def main(argv):
         return CUPS_BACKEND_AUTH_REQUIRED
 
     config = load_config()
-    netid = netid_for(config, cups_user)
+    stored = netid_for(config, cups_user)
+    netid = stored
+
+    if (config.get("prompt") or "never").strip().lower() == "always":
+        question = "Please enter your DKU NetID"
+        reply = ask_agent(cups_user, queue, question, stored)
+        if reply is None:
+            log("WARNING", "popup - popup agent unavailable, using stored NetID")
+        elif reply.get("error") == "cancelled":
+            log("INFO", "popup - user cancelled at the NetID prompt")
+            return CUPS_BACKEND_OK  # cancelling a print is not a failure
+        elif reply.get("netid"):
+            netid = reply["netid"].strip()
+
+    if netid and not valid_netid(netid):
+        log("ERROR", "popup - refusing malformed NetID %r" % netid)
+        return CUPS_BACKEND_FAILED
+
     if not netid:
         log("ERROR", "popup - no DKU NetID configured for user '%s'. "
                      "Run: dku-eprint set-netid <netid>" % cups_user)

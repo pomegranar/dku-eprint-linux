@@ -17,6 +17,17 @@ mainly useful for testing.
 """
 
 import os
+import re
+
+# A NetID ends up in the LPD control file, one field per line, so anything with
+# a newline in it could forge extra control lines.  Keep it to what a NetID
+# actually is.
+NETID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def valid_netid(value):
+    return bool(value) and bool(NETID_RE.match(value.strip()))
+
 
 CONFIG_PATHS = [
     os.environ.get("DKU_EPRINT_CONFIG") or "",
@@ -28,6 +39,9 @@ DEFAULTS = {
     "server": "dku-ep-ps2-pap1.oit.duke.edu",
     "netid": "",
     "hostname": "",
+    # never  -- always use the stored netid (set once at install)
+    # always -- ask in a desktop dialog for every job, via dku-eprint-agent
+    "prompt": "never",
 }
 
 
@@ -96,6 +110,10 @@ def write_config(cfg, path=None):
         "",
         "server = %s" % cfg.get("server", DEFAULTS["server"]),
         "netid = %s" % cfg.get("netid", ""),
+        "",
+        "# never  = always use the netid above",
+        "# always = ask in a desktop dialog for every job",
+        "prompt = %s" % cfg.get("prompt", DEFAULTS["prompt"]),
     ]
     if cfg.get("hostname"):
         lines.append("hostname = %s" % cfg["hostname"])

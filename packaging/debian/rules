@@ -1,0 +1,23 @@
+#!/usr/bin/make -f
+%:
+	dh $@
+
+override_dh_auto_install:
+	install -d -m 755 debian/dku-eprint/usr/share/dku-eprint
+	install -m 644 src/eprint_pharos.py debian/dku-eprint/usr/share/dku-eprint/
+	install -m 644 src/eprint_config.py debian/dku-eprint/usr/share/dku-eprint/
+	install -d -m 755 debian/dku-eprint/usr/share/ppd/dku-eprint
+	install -m 644 vendor/ppd/*.ppd debian/dku-eprint/usr/share/ppd/dku-eprint/
+	install -d -m 755 debian/dku-eprint/usr/lib/cups/backend
+	install -m 700 src/popup debian/dku-eprint/usr/lib/cups/backend/popup
+	install -d -m 755 debian/dku-eprint/usr/bin
+	install -m 755 src/dku-eprint debian/dku-eprint/usr/bin/dku-eprint
+	install -m 755 src/dku-eprint-agent debian/dku-eprint/usr/bin/dku-eprint-agent
+	install -d -m 755 debian/dku-eprint/usr/lib/systemd/user
+	install -m 644 packaging/systemd/dku-eprint-agent.service \
+		debian/dku-eprint/usr/lib/systemd/user/
+	install -d -m 755 debian/dku-eprint/etc/dku-eprint
+
+# The backend must stay 0700 root:root or CUPS will not run it as root.
+override_dh_fixperms:
+	dh_fixperms --exclude usr/lib/cups/backend/popup

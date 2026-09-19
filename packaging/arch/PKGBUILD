@@ -1,0 +1,41 @@
+# Maintainer: Anar Nyambayar <anar.nyambayar@gmail.com>
+pkgname=dku-eprint
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Linux CUPS driver for the DKU ePrint (Pharos Uniprint) service"
+arch=('any')
+url="https://github.com/anar/linux-eprint"
+license=('MIT')
+depends=('cups' 'python')
+optdepends=('zenity: NetID popup dialog on GTK desktops'
+            'kdialog: NetID popup dialog on KDE')
+backup=('etc/dku-eprint/eprint.conf')
+source=("$pkgname-$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    cd "$srcdir/$pkgname-$pkgver"
+
+    install -d -m 755 "$pkgdir/usr/share/$pkgname"
+    install -m 644 src/eprint_pharos.py "$pkgdir/usr/share/$pkgname/"
+    install -m 644 src/eprint_config.py "$pkgdir/usr/share/$pkgname/"
+
+    install -d -m 755 "$pkgdir/usr/share/ppd/$pkgname"
+    install -m 644 vendor/ppd/*.ppd "$pkgdir/usr/share/ppd/$pkgname/"
+
+    # Must stay 0700 root:root or CUPS refuses to run it as root.
+    install -Dm700 src/popup "$pkgdir/usr/lib/cups/backend/popup"
+
+    install -Dm755 src/dku-eprint       "$pkgdir/usr/bin/dku-eprint"
+    install -Dm755 src/dku-eprint-agent "$pkgdir/usr/bin/dku-eprint-agent"
+
+    install -Dm644 packaging/systemd/dku-eprint-agent.service \
+        "$pkgdir/usr/lib/systemd/user/dku-eprint-agent.service"
+
+    install -Dm644 LICENSE        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 THIRD-PARTY.md "$pkgdir/usr/share/licenses/$pkgname/THIRD-PARTY.md"
+    install -Dm644 README.md      "$pkgdir/usr/share/doc/$pkgname/README.md"
+    install -Dm644 docs/PROTOCOL.md "$pkgdir/usr/share/doc/$pkgname/PROTOCOL.md"
+
+    install -d -m 755 "$pkgdir/etc/$pkgname"
+}

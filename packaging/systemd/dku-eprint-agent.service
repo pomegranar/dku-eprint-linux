@@ -1,0 +1,17 @@
+[Unit]
+Description=DKU ePrint NetID popup agent
+Documentation=https://github.com/
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/dku-eprint-agent
+Restart=on-failure
+RestartSec=5
+# The agent only ever shows a dialog and writes one socket.
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

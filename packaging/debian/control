@@ -1,0 +1,23 @@
+Source: dku-eprint
+Section: utils
+Priority: optional
+Maintainer: Anar Nyambayar <anar.nyambayar@gmail.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/anar/linux-eprint
+
+Package: dku-eprint
+Architecture: all
+Depends: ${misc:Depends}, cups, python3
+Recommends: zenity | kdialog
+Description: Linux CUPS driver for the DKU ePrint (Pharos Uniprint) service
+ A CUPS backend and helper tools that let a Linux machine print to Duke
+ Kunshan University's ePrint service, which runs Pharos Uniprint. Jobs are
+ held at the server and released with a DKUCard at any ePrint station.
+ .
+ Includes an optional per-user agent that asks for the NetID in a desktop
+ dialog for each job, mirroring the macOS client's behaviour.
+ .
+ The PPD files under /usr/share/ppd/dku-eprint are unmodified vendor files
+ from Ricoh and Lexmark and are not covered by this package's MIT license;
+ see THIRD-PARTY.md.

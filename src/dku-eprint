@@ -2,7 +2,10 @@
 """Admin/diagnostic CLI for the DKU ePrint Linux driver.
 
     dku-eprint set-netid <netid> [--user UNIX_USER]
+    dku-eprint set-prompt never|always
     dku-eprint show
+    dku-eprint add-queues [--ppd-dir DIR]
+    dku-eprint remove-queues
     dku-eprint probe [--queue NAME]
     dku-eprint test-page [--queue NAME]
 """
@@ -10,15 +13,27 @@
 import argparse
 import os
 import socket
+import subprocess
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__))))
-sys.path.insert(0, "/usr/share/dku-eprint")
+# Our own directory wins, so a git checkout stays self-consistent even when an
+# older copy is installed system-wide; /usr/share is the fallback for the
+# installed backend, whose modules live there.
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+sys.path.append("/usr/share/dku-eprint")
 
 import eprint_pharos as pharos
 from eprint_config import load_config, write_config, config_path, netid_for
 
 QUEUES = ["ePrint-Ricoh-BW", "ePrint-Ricoh-Color", "ePrint-Lexmark-BW"]
+
+# CUPS queue name -> (PPD filename, queue name on the print server)
+QUEUE_PPDS = [
+    ("ePrint-Ricoh-BW",    "RICOH Aficio MP 5002.ppd",  "ePrint-Ricoh-BW"),
+    ("ePrint-Ricoh-Color", "RICOH Aficio MP C4503.ppd", "ePrint-Ricoh-Color"),
+    ("ePrint-Lexmark-BW",  "MS810.ppd",                 "ePrint-Lexmark-BW"),
+]
+DEFAULT_PPD_DIR = "/usr/share/ppd/dku-eprint"
 
 # Placeholders are @NAME@ rather than %s: PostScript uses % for comments, so
 # %-formatting would choke on the "%!PS" header.
@@ -64,11 +79,74 @@ def cmd_set_netid(args):
     return 0
 
 
+def cmd_set_prompt(args):
+    if args.mode not in ("never", "always"):
+        sys.stderr.write("error: mode must be 'never' or 'always'\n")
+        return 1
+    cfg = load_config()
+    cfg["prompt"] = args.mode
+    try:
+        path = write_config(cfg)
+    except PermissionError:
+        sys.stderr.write("error: need root to write %s (try sudo)\n" % config_path())
+        return 1
+    print("Wrote %s (prompt = %s)" % (path, args.mode))
+    if args.mode == "always":
+        print("Enable the dialog agent in your desktop session with:")
+        print("  systemctl --user enable --now dku-eprint-agent.service")
+    return 0
+
+
+def cmd_add_queues(args):
+    cfg = load_config()
+    server = args.server or cfg.get("server")
+    ppd_dir = args.ppd_dir or DEFAULT_PPD_DIR
+    if os.geteuid() != 0:
+        sys.stderr.write("error: need root to run lpadmin (try sudo)\n")
+        return 1
+
+    rc = 0
+    for name, ppd, remote in QUEUE_PPDS:
+        path = os.path.join(ppd_dir, ppd)
+        if not os.path.isfile(path):
+            sys.stderr.write("warning: no PPD %s, skipping %s\n" % (path, name))
+            rc = 1
+            continue
+        subprocess.run(["lpadmin", "-x", name],
+                       capture_output=True)  # ignore "no such printer"
+        proc = subprocess.run([
+            "lpadmin", "-p", name, "-D", name, "-E",
+            "-P", path,
+            "-o", "printer-is-shared=false",
+            "-o", "PageSize=Letter",
+            "-v", "popup://%s/%s" % (server, remote),
+        ], capture_output=True)
+        if proc.returncode != 0:
+            sys.stderr.write("error: %s: %s\n"
+                             % (name, proc.stderr.decode().strip()))
+            rc = 1
+        else:
+            print("  added %s" % name)
+    return rc
+
+
+def cmd_remove_queues(args):
+    if os.geteuid() != 0:
+        sys.stderr.write("error: need root to run lpadmin (try sudo)\n")
+        return 1
+    for name in QUEUES:
+        proc = subprocess.run(["lpadmin", "-x", name], capture_output=True)
+        if proc.returncode == 0:
+            print("  removed %s" % name)
+    return 0
+
+
 def cmd_show(args):
     cfg = load_config()
     print("config file : %s" % config_path())
     print("server      : %s" % cfg.get("server"))
     print("netid       : %s" % (cfg.get("netid") or "(unset)"))
+    print("prompt      : %s" % cfg.get("prompt", "never"))
     for user, netid in sorted((cfg.get("users") or {}).items()):
         print("  %-10s: %s" % (user, netid))
     effective = netid_for(cfg, os.environ.get("USER", ""))
@@ -146,8 +224,19 @@ def main():
     p.add_argument("--user", help="apply to one Unix account only")
     p.set_defaults(func=cmd_set_netid)
 
+    p = sub.add_parser("set-prompt", help="ask for the NetID every job, or never")
+    p.add_argument("mode", choices=["never", "always"])
+    p.set_defaults(func=cmd_set_prompt)
+
     p = sub.add_parser("show", help="print the effective configuration")
     p.set_defaults(func=cmd_show)
+
+    p = sub.add_parser("add-queues", help="create the three ePrint CUPS queues")
+    p.add_argument("--ppd-dir", help="where the PPDs live (default %s)" % DEFAULT_PPD_DIR)
+    p.set_defaults(func=cmd_add_queues)
+
+    p = sub.add_parser("remove-queues", help="delete the ePrint CUPS queues")
+    p.set_defaults(func=cmd_remove_queues)
 
     p = sub.add_parser("probe", help="ask the print server what each queue requires")
     p.add_argument("--queue")

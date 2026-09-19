@@ -1,0 +1,177 @@
+#!/usr/bin/python3
+"""Per-user popup agent for the DKU ePrint backend.
+
+This is the Linux equivalent of the macOS client's Popup.app.  The CUPS backend
+runs as root with no session, so it cannot put a window on screen.  This agent
+runs inside the desktop session as a systemd --user service, listens on a Unix
+socket in $XDG_RUNTIME_DIR, and answers the backend's question by showing a
+dialog.
+
+Wire protocol: one JSON object per line, request then response.
+
+    -> {"op": "ask", "queue": "ePrint-Ricoh-BW", "prompt": "...", "default": "abc123"}
+    <- {"netid": "abc123"}
+    <- {"error": "cancelled"}
+
+Only root and the owning user can reach the socket (it lives in a 0700 runtime
+directory and is itself 0600).
+"""
+
+import json
+import os
+import socket
+import subprocess
+import sys
+import threading
+
+# Our own directory wins, so a git checkout stays self-consistent even when an
+# older copy is installed system-wide; /usr/share is the fallback for the
+# installed backend, whose modules live there.
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+sys.path.append("/usr/share/dku-eprint")
+
+from eprint_config import load_config, netid_for, valid_netid
+
+SOCKET_NAME = "dku-eprint.sock"
+DIALOG_TIMEOUT = 300  # seconds a dialog may stay on screen
+IDLE_LOG = "dku-eprint-agent"
+
+
+def log(msg):
+    sys.stderr.write("%s: %s\n" % (IDLE_LOG, msg))
+    sys.stderr.flush()
+
+
+def socket_path():
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if not runtime:
+        runtime = "/run/user/%d" % os.getuid()
+    return os.path.join(runtime, SOCKET_NAME)
+
+
+# --- dialogs ----------------------------------------------------------------
+
+def _have(cmd):
+    return subprocess.run(["sh", "-c", "command -v %s" % cmd],
+                          capture_output=True).returncode == 0
+
+
+def _run(argv, timeout):
+    try:
+        proc = subprocess.run(argv, capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None
+    if proc.returncode != 0:
+        return None  # cancelled or dialog unavailable
+    return proc.stdout.decode("utf-8", "replace").strip()
+
+
+def ask_zenity(prompt, default, queue):
+    return _run([
+        "zenity", "--entry",
+        "--title=DKU ePrint",
+        "--text=%s\n\nQueue: %s" % (prompt, queue),
+        "--entry-text=%s" % (default or ""),
+    ], DIALOG_TIMEOUT)
+
+
+def ask_kdialog(prompt, default, queue):
+    return _run([
+        "kdialog", "--title", "DKU ePrint",
+        "--inputbox", "%s\n\nQueue: %s" % (prompt, queue), default or "",
+    ], DIALOG_TIMEOUT)
+
+
+def ask_user(prompt, default, queue):
+    """Try each dialog tool that is actually installed, in desktop-fit order."""
+    kde = "kde" in (os.environ.get("XDG_CURRENT_DESKTOP") or "").lower()
+    order = ["kdialog", "zenity"] if kde else ["zenity", "kdialog"]
+    for name in order:
+        if not _have(name):
+            continue
+        answer = {"zenity": ask_zenity, "kdialog": ask_kdialog}[name](
+            prompt, default, queue)
+        if answer is None:
+            return None  # user cancelled; don't fall through to another dialog
+        return answer
+    log("no dialog tool found (install zenity or kdialog)")
+    return None
+
+
+# --- server -----------------------------------------------------------------
+
+def handle(conn, cfg_default):
+    with conn:
+        conn.settimeout(DIALOG_TIMEOUT + 15)
+        try:
+            data = b""
+            while not data.endswith(b"\n") and len(data) < 65536:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+            request = json.loads(data.decode("utf-8", "replace") or "{}")
+        except (OSError, ValueError) as exc:
+            log("bad request: %s" % exc)
+            return
+
+        if request.get("op") != "ask":
+            conn.sendall(b'{"error": "unsupported op"}\n')
+            return
+
+        prompt = request.get("prompt") or "Please enter your DKU NetID"
+        queue = request.get("queue") or "ePrint"
+        default = request.get("default") or cfg_default or ""
+
+        log("prompting for %s" % queue)
+        answer = ask_user(prompt, default, queue)
+
+        if answer is None:
+            reply = {"error": "cancelled"}
+        elif not valid_netid(answer):
+            reply = {"error": "invalid netid"}
+        else:
+            reply = {"netid": answer}
+        try:
+            conn.sendall((json.dumps(reply) + "\n").encode())
+        except OSError:
+            pass
+
+
+def serve():
+    path = socket_path()
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(path)
+    os.chmod(path, 0o600)
+    server.listen(8)
+    log("listening on %s" % path)
+
+    cfg = load_config()
+    cfg_default = netid_for(cfg, os.environ.get("USER", ""))
+
+    try:
+        while True:
+            conn, _ = server.accept()
+            threading.Thread(target=handle, args=(conn, cfg_default),
+                             daemon=True).start()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.close()
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+
+
+if __name__ == "__main__":
+    if os.geteuid() == 0:
+        sys.stderr.write("dku-eprint-agent: refusing to run as root; "
+                         "this is a per-user session service\n")
+        sys.exit(1)
+    serve()

@@ -3,3 +3,6 @@ build/
 *.tmp
 __pycache__/
 *.pyc
+build/
+dist/
+debian/
