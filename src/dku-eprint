@@ -101,10 +101,10 @@ def cmd_add_queues(args):
     cfg = load_config()
     server = args.server or cfg.get("server")
     ppd_dir = args.ppd_dir or DEFAULT_PPD_DIR
-    if os.geteuid() != 0:
-        sys.stderr.write("error: need root to run lpadmin (try sudo)\n")
-        return 1
 
+    # Don't pre-check for root: CUPS also lets members of the system group
+    # (wheel/lpadmin on most distros) run lpadmin. Let lpadmin decide and
+    # surface whatever it actually says.
     rc = 0
     for name, ppd, remote in QUEUE_PPDS:
         path = os.path.join(ppd_dir, ppd)
@@ -131,9 +131,6 @@ def cmd_add_queues(args):
 
 
 def cmd_remove_queues(args):
-    if os.geteuid() != 0:
-        sys.stderr.write("error: need root to run lpadmin (try sudo)\n")
-        return 1
     for name in QUEUES:
         proc = subprocess.run(["lpadmin", "-x", name], capture_output=True)
         if proc.returncode == 0:
