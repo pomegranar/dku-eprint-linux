@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = remove ]; then
+    /usr/bin/dku-eprint remove-queues >/dev/null 2>&1 || :
+    systemctl --global disable dku-eprint-agent.service >/dev/null 2>&1 || :
+fi
+
+#DEBHELPER#

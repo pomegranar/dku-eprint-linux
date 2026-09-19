@@ -10,6 +10,7 @@ depends=('cups' 'python')
 optdepends=('zenity: NetID popup dialog on GTK desktops'
             'kdialog: NetID popup dialog on KDE')
 backup=('etc/dku-eprint/eprint.conf')
+install="$pkgname.install"
 source=("$pkgname-$pkgver.tar.gz")
 sha256sums=('SKIP')
 
@@ -20,8 +21,9 @@ package() {
     install -m 644 src/eprint_pharos.py "$pkgdir/usr/share/$pkgname/"
     install -m 644 src/eprint_config.py "$pkgdir/usr/share/$pkgname/"
 
-    install -d -m 755 "$pkgdir/usr/share/ppd/$pkgname"
-    install -m 644 vendor/ppd/*.ppd "$pkgdir/usr/share/ppd/$pkgname/"
+    # Vendor Ricoh PPDs name a macOS-only filter; cupsd stops every job to a
+    # queue whose PPD references a filter it cannot execute.
+    tools/prepare-ppds.sh vendor/ppd "$pkgdir/usr/share/ppd/$pkgname"
 
     # Must stay 0700 root:root or CUPS refuses to run it as root.
     install -Dm700 src/popup "$pkgdir/usr/lib/cups/backend/popup"
@@ -37,5 +39,5 @@ package() {
     install -Dm644 README.md      "$pkgdir/usr/share/doc/$pkgname/README.md"
     install -Dm644 docs/PROTOCOL.md "$pkgdir/usr/share/doc/$pkgname/PROTOCOL.md"
 
-    install -d -m 755 "$pkgdir/etc/$pkgname"
+    install -Dm644 packaging/eprint.conf "$pkgdir/etc/$pkgname/eprint.conf"
 }

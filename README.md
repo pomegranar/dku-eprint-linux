@@ -64,8 +64,13 @@ make arch    # Arch          -> build/arch/
 > on Fedora, so the apt and pacman branches of its dependency handling have not
 > been exercised on a real machine either. Reports and patches welcome.
 
-Then `sudo dku-eprint set-netid <netid>` and `sudo dku-eprint add-queues`,
-since a package should not create printers for you at install time.
+The packages are self-contained: installing one creates the three queues,
+enables the NetID dialog agent, and needs no terminal afterwards. Install it
+from your graphical software centre, print, type your NetID into the dialog
+that appears, and collect the job with your DKUCard.
+
+If `cupsd` was not running at install time the queues cannot be created, and
+the package says so; finish with `sudo dku-eprint add-queues`.
 
 ## Requirements
 
@@ -120,7 +125,7 @@ netid  = abc123
 
 # never  = always use the netid above
 # always = ask in a desktop dialog for every job
-prompt = never
+prompt = always
 
 # Optional per-account overrides for shared machines
 [users]
@@ -136,10 +141,12 @@ dku-eprint show
 
 ### Two ways to supply the NetID
 
-`prompt = never` (default) uses the stored NetID for every job. Simplest, and
-it works for headless and SSH printing.
+`prompt = never` uses the stored NetID for every job. Simplest, and the right
+choice for headless and SSH printing. `install.sh` offers it as option 1.
 
 `prompt = always` reproduces the macOS client: a dialog appears for each job.
+This is what the distro packages default to, since a package has no way to ask
+you for a NetID while it installs.
 
 ```sh
 sudo dku-eprint set-prompt always
@@ -179,10 +186,11 @@ vendor binary.
 python3 -m unittest discover -s tests
 ```
 
-50 tests: wire-format checks against captured bytes, RC4 against a published
-vector, NetID validation, the agent socket protocol, and a full backend run
-driven exactly as `cupsd` drives it against a stub LPD server. They need no
-network and touch nothing outside `/tmp`.
+60 tests: wire-format checks against captured bytes, RC4 against a published
+vector, NetID validation, the agent socket protocol, the PPD patching described
+in [`THIRD-PARTY.md`](THIRD-PARTY.md) (validated with `cupstestppd` where it is
+installed), and a full backend run driven exactly as `cupsd` drives it against a
+stub LPD server. They need no network and touch nothing outside `/tmp`.
 
 ## Layout
 
@@ -194,6 +202,7 @@ src/dku-eprint         admin/diagnostic CLI
 src/dku-eprint-agent   per-user dialog agent for prompt = always
 packaging/             rpm spec, debian/, PKGBUILD, systemd user unit
 vendor/ppd/            PPDs from MACePrint.dmg, unmodified
+tools/prepare-ppds.sh  strips the macOS-only filter at install time
 docs/PROTOCOL.md       wire format documentation
 tests/                 unit and end-to-end tests
 LICENSE                MIT, for the original work

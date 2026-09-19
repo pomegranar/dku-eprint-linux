@@ -41,7 +41,7 @@ deb:
 
 arch: dist
 	@mkdir -p build/arch
-	cp packaging/arch/PKGBUILD build/arch/
+	cp packaging/arch/PKGBUILD packaging/arch/dku-eprint.install build/arch/
 	cp dist/$(DIST).tar.gz build/arch/
 	cd build/arch && makepkg -f
 	@echo "==> build/arch/"

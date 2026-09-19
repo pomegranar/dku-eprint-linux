@@ -12,6 +12,36 @@ These are unmodified PostScript Printer Description files, extracted from the
 `MACePrint.dmg` installer distributed by Duke Kunshan University. They are
 included so the driver works out of the box.
 
+**What ships in `vendor/ppd/` is byte-for-byte what Ricoh and Lexmark wrote.**
+What gets *installed* is not quite: see below.
+
+### The macOS filter patch
+
+Both Ricoh PPDs declare a filter that only exists on macOS:
+
+```
+*cupsFilter: "application/vnd.cups-postscript 0 \
+              /Library/Printers/RICOH/Filters/pstopsRV1.app/Contents/MacOS/pstopsRV1"
+```
+
+cupsd does not treat a missing `cupsFilter` as optional. Installed as-is, every
+job to those queues dies with:
+
+```
+Unable to start filter ".../pstopsRV1" - No such file or directory.
+Stopping job because the scheduler could not execute a filter.
+```
+
+So `tools/prepare-ppds.sh` comments that line out (and the equally absent
+`*cupsICCProfile`) while copying the PPDs into place, at install or package
+build time. CUPS then falls back to its own `pstops`, which is correct for what
+is a plain PostScript printer. Ricoh-specific extras that their filter would
+have applied are lost; ordinary printing, duplex, paper size and the Pharos
+accounting block are not.
+
+The lines are commented with `*%` rather than deleted, so an installed PPD still
+records what the vendor shipped.
+
 They are **not** covered by this project's MIT license and are not the
 project author's to relicense. They are redistributed for interoperability
 under their respective vendors' terms. PPDs are conventionally distributed

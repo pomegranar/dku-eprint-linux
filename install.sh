@@ -139,16 +139,13 @@ install -d -m 755 "$SHARE_DIR" "$PPD_DIR" "$CONF_DIR"
 install -m 644 "$SRC_DIR/src/eprint_pharos.py" "$SHARE_DIR/"
 install -m 644 "$SRC_DIR/src/eprint_config.py" "$SHARE_DIR/"
 
+# The vendor Ricoh PPDs name a macOS-only filter; left in place, cupsd stops
+# every job to those queues.  prepare-ppds.sh neutralises that.
 say "Installing PPDs from $SRC_PPD_DIR"
-shopt -s nullglob
-ppds=("$SRC_PPD_DIR"/*.ppd)
-shopt -u nullglob
-if [[ ${#ppds[@]} -eq 0 ]]; then
-    echo "error: no .ppd files in $SRC_PPD_DIR" >&2
+if ! "$SRC_DIR/tools/prepare-ppds.sh" "$SRC_PPD_DIR" "$PPD_DIR"; then
     echo "       supply your own with --ppd-dir DIR (see THIRD-PARTY.md)" >&2
     exit 1
 fi
-install -m 644 "${ppds[@]}" "$PPD_DIR/"
 
 # CUPS refuses to run a backend that is group- or world-writable, and runs it as
 # root only when it is not world-readable either.

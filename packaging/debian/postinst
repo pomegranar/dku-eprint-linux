@@ -1,0 +1,27 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = configure ] && [ -z "$2" ]; then
+    # Enable the NetID dialog agent for every user's future session...
+    systemctl --global enable dku-eprint-agent.service >/dev/null 2>&1 || :
+    # ...and for anyone already logged in, so printing works without a re-login.
+    for _uid in $(loginctl list-users --no-legend 2>/dev/null | awk '{print $1}'); do
+        systemctl --user -M "${_uid}@" start dku-eprint-agent.service \
+            >/dev/null 2>&1 || :
+    done
+
+    # Queues need cupsd. Start it if it is not already up; if that fails, say so
+    # rather than failing the package install.
+    if ! systemctl is-active --quiet cups 2>/dev/null; then
+        systemctl start cups >/dev/null 2>&1 || :
+    fi
+    if /usr/bin/dku-eprint add-queues >/dev/null 2>&1; then
+        echo "DKU ePrint queues are ready. Print to ePrint-Ricoh-BW and enter"
+        echo "your NetID when prompted; release at any ePrint station."
+    else
+        echo "DKU ePrint installed, but the print queues could not be created"
+        echo "(is cupsd running?). Finish with: sudo dku-eprint add-queues"
+    fi
+fi
+
+#DEBHELPER#

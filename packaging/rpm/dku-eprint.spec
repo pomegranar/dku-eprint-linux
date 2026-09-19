@@ -32,8 +32,9 @@ install -d -m 755 %{buildroot}%{_datadir}/%{name}
 install -m 644 src/eprint_pharos.py %{buildroot}%{_datadir}/%{name}/
 install -m 644 src/eprint_config.py %{buildroot}%{_datadir}/%{name}/
 
-install -d -m 755 %{buildroot}%{_datadir}/ppd/%{name}
-install -m 644 vendor/ppd/*.ppd %{buildroot}%{_datadir}/ppd/%{name}/
+# The vendor Ricoh PPDs name a macOS-only filter; cupsd stops every job to a
+# queue whose PPD references a filter it cannot execute.
+tools/prepare-ppds.sh vendor/ppd %{buildroot}%{_datadir}/ppd/%{name}
 
 install -d -m 755 %{buildroot}%{_prefix}/lib/cups/backend
 install -m 700 src/popup %{buildroot}%{_prefix}/lib/cups/backend/popup
@@ -46,11 +47,36 @@ install -d -m 755 %{buildroot}%{_userunitdir}
 install -m 644 packaging/systemd/dku-eprint-agent.service %{buildroot}%{_userunitdir}/
 
 install -d -m 755 %{buildroot}%{_sysconfdir}/%{name}
+install -m 644 packaging/eprint.conf %{buildroot}%{_sysconfdir}/%{name}/eprint.conf
 
 %post
 if [ $1 -eq 1 ]; then
-    echo "Set your NetID:  sudo dku-eprint set-netid <netid>"
-    echo "Create queues:   sudo dku-eprint add-queues"
+    # Enable the NetID dialog agent for every user's future session.
+    systemctl --global enable dku-eprint-agent.service >/dev/null 2>&1 || :
+    # ...and for anyone already logged in, so printing works without a re-login.
+    for _uid in $(loginctl list-users --no-legend 2>/dev/null | awk '{print $1}'); do
+        systemctl --user -M "${_uid}@" start dku-eprint-agent.service \
+            >/dev/null 2>&1 || :
+    done
+
+    # Queues need cupsd. Start it if it is not already up; if that fails, say so
+    # rather than failing the package install.
+    if ! systemctl is-active --quiet cups 2>/dev/null; then
+        systemctl start cups >/dev/null 2>&1 || :
+    fi
+    if %{_bindir}/dku-eprint add-queues >/dev/null 2>&1; then
+        echo "DKU ePrint queues are ready. Print to ePrint-Ricoh-BW and enter"
+        echo "your NetID when prompted; release at any ePrint station."
+    else
+        echo "DKU ePrint installed, but the print queues could not be created"
+        echo "(is cupsd running?). Finish with: sudo dku-eprint add-queues"
+    fi
+fi
+
+%preun
+if [ $1 -eq 0 ]; then
+    %{_bindir}/dku-eprint remove-queues >/dev/null 2>&1 || :
+    systemctl --global disable dku-eprint-agent.service >/dev/null 2>&1 || :
 fi
 
 %files
@@ -65,6 +91,7 @@ fi
 %{_bindir}/dku-eprint-agent
 %{_userunitdir}/dku-eprint-agent.service
 %dir %{_sysconfdir}/%{name}
+%config(noreplace) %{_sysconfdir}/%{name}/eprint.conf
 
 %changelog
 * Sat Sep 19 2026 Anar Nyambayar <anar.nyambayar@gmail.com> - 1.0.0-1

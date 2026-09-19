@@ -6,8 +6,9 @@ override_dh_auto_install:
 	install -d -m 755 debian/dku-eprint/usr/share/dku-eprint
 	install -m 644 src/eprint_pharos.py debian/dku-eprint/usr/share/dku-eprint/
 	install -m 644 src/eprint_config.py debian/dku-eprint/usr/share/dku-eprint/
-	install -d -m 755 debian/dku-eprint/usr/share/ppd/dku-eprint
-	install -m 644 vendor/ppd/*.ppd debian/dku-eprint/usr/share/ppd/dku-eprint/
+	# Vendor Ricoh PPDs name a macOS-only filter; cupsd stops every job to a
+	# queue whose PPD references a filter it cannot execute.
+	tools/prepare-ppds.sh vendor/ppd debian/dku-eprint/usr/share/ppd/dku-eprint
 	install -d -m 755 debian/dku-eprint/usr/lib/cups/backend
 	install -m 700 src/popup debian/dku-eprint/usr/lib/cups/backend/popup
 	install -d -m 755 debian/dku-eprint/usr/bin
@@ -17,6 +18,7 @@ override_dh_auto_install:
 	install -m 644 packaging/systemd/dku-eprint-agent.service \
 		debian/dku-eprint/usr/lib/systemd/user/
 	install -d -m 755 debian/dku-eprint/etc/dku-eprint
+	install -m 644 packaging/eprint.conf debian/dku-eprint/etc/dku-eprint/eprint.conf
 
 # The backend must stay 0700 root:root or CUPS will not run it as root.
 override_dh_fixperms:
