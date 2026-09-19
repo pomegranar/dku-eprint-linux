@@ -64,6 +64,11 @@ make arch    # Arch          -> build/arch/
 > on Fedora, so the apt and pacman branches of its dependency handling have not
 > been exercised on a real machine either. Reports and patches welcome.
 
+The driver itself is not Fedora-specific, and has printed for real from both
+Fedora and Arch: a job sent from an Arch machine reached the server and released
+at a station normally. What remains unproven there is the packaging around it,
+not the backend.
+
 The packages are self-contained: installing one creates the three queues,
 enables the NetID dialog agent, and needs no terminal afterwards. Install it
 from your graphical software centre, print, type your NetID into the dialog
