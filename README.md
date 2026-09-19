@@ -17,14 +17,23 @@ station, exactly as with the macOS client.
 
 ## Install
 
+One command, on Debian/Ubuntu, Fedora/RHEL or Arch:
+
 ```sh
-git clone <this repo> && cd linux-eprint
-sudo ./install.sh --netid your-netid
+git clone <this repo> && cd linux-eprint && sudo ./install.sh
 ```
 
-That installs the backend, the PPDs, and three queues — `ePrint-Ricoh-BW`,
-`ePrint-Ricoh-Color` and `ePrint-Lexmark-BW` — matching what the macOS installer
-creates.
+It installs any missing dependencies with your distro's package manager, sets
+up the backend and PPDs, creates the three queues — `ePrint-Ricoh-BW`,
+`ePrint-Ricoh-Color`, `ePrint-Lexmark-BW`, matching the macOS installer — and
+asks how you want to supply your NetID.
+
+Non-interactive:
+
+```sh
+sudo ./install.sh --netid abc123            # store it, use it for every job
+sudo ./install.sh --prompt always           # ask in a dialog, every job
+```
 
 Verify:
 
@@ -35,6 +44,17 @@ lp -d ePrint-Ricoh-BW file.pdf
 ```
 
 Remove it with `sudo ./uninstall.sh` (add `--purge` to drop the config too).
+
+### Distro packages
+
+```sh
+make rpm     # Fedora/RHEL   -> build/rpm/RPMS/noarch/
+make deb     # Debian/Ubuntu -> ../dku-eprint_1.0.0*.deb
+make arch    # Arch          -> build/arch/
+```
+
+Then `sudo dku-eprint set-netid <netid>` and `sudo dku-eprint add-queues`,
+since a package should not create printers for you at install time.
 
 ## Requirements
 
@@ -87,6 +107,10 @@ less disruptive than disconnecting from your tailnet.
 server = dku-ep-ps2-pap1.oit.duke.edu
 netid  = abc123
 
+# never  = always use the netid above
+# always = ask in a desktop dialog for every job
+prompt = never
+
 # Optional per-account overrides for shared machines
 [users]
 alice = abc123
@@ -99,16 +123,30 @@ sudo dku-eprint set-netid xyz789 --user bob
 dku-eprint show
 ```
 
-### Why a config file instead of a popup
+### Two ways to supply the NetID
 
-The macOS client shows a window asking for your NetID at print time. A CUPS
-backend can't do that: it runs as the `lp` user with no session, no display, and
-often before you're back at the machine. So the NetID is configured once,
-up front, and every job uses it.
+`prompt = never` (default) uses the stored NetID for every job. Simplest, and
+it works for headless and SSH printing.
 
-The backend still asks the server which questions the queue wants, so if DKU
-ever adds a question the failure is a clear log line rather than a silently
-malformed job.
+`prompt = always` reproduces the macOS client: a dialog appears for each job.
+
+```sh
+sudo dku-eprint set-prompt always
+systemctl --user enable --now dku-eprint-agent.service   # as your own user
+```
+
+A CUPS backend cannot open a window itself — it runs as root with no session,
+no display, and often before you are back at the machine. So the same split the
+macOS client uses applies here: `dku-eprint-agent` runs inside your desktop
+session, and the backend hands it the question over a socket in
+`$XDG_RUNTIME_DIR`. It shows the dialog with `zenity` or `kdialog`.
+
+If the agent is not running — headless, SSH, or a different user — the backend
+logs a warning and falls back to the stored NetID rather than failing the job.
+Cancelling the dialog cancels the print, quietly.
+
+The backend also asks the server which questions the queue wants, so if DKU ever
+adds one, you get a clear log line rather than a silently malformed job.
 
 ## How it works
 
@@ -130,9 +168,10 @@ vendor binary.
 python3 -m unittest discover -s tests
 ```
 
-38 tests: wire-format checks against captured bytes, RC4 against a published
-vector, and a full backend run driven exactly as `cupsd` drives it against a
-stub LPD server. They need no network and touch nothing outside `/tmp`.
+50 tests: wire-format checks against captured bytes, RC4 against a published
+vector, NetID validation, the agent socket protocol, and a full backend run
+driven exactly as `cupsd` drives it against a stub LPD server. They need no
+network and touch nothing outside `/tmp`.
 
 ## Layout
 
@@ -141,6 +180,8 @@ src/eprint_pharos.py   protocol library (popup protocol, block builder, LPD)
 src/eprint_config.py   config file handling
 src/popup              the CUPS backend
 src/dku-eprint         admin/diagnostic CLI
+src/dku-eprint-agent   per-user dialog agent for prompt = always
+packaging/             rpm spec, debian/, PKGBUILD, systemd user unit
 vendor/ppd/            PPDs from MACePrint.dmg, unmodified
 docs/PROTOCOL.md       wire format documentation
 tests/                 unit and end-to-end tests
