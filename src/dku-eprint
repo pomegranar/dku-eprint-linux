@@ -1,14 +1,10 @@
 #!/usr/bin/python3
-"""Printing, configuration and diagnostic CLI for the DKU ePrint Linux driver.
+"""Command line client for the DKU ePrint service.
 
-    dku-eprint set-netid <netid> [--user UNIX_USER]
-    dku-eprint set-prompt never|always
-    dku-eprint show
-    dku-eprint add-queues [--ppd-dir DIR]
-    dku-eprint remove-queues
-    dku-eprint probe [--queue NAME]
-    dku-eprint test-page [--queue NAME]
-    dku-eprint print [--queue NAME] [--copies N] FILE...
+Printing is `dku-eprint print`; the remaining subcommands configure the driver
+and diagnose it.  `dku-eprint --help` renders HELP below, which is written out
+by hand so that printing comes first and the management commands last, rather
+than in argparse's flat alphabetical clump.
 """
 
 import argparse
@@ -27,6 +23,14 @@ import eprint_pharos as pharos
 from eprint_config import load_config, write_config, config_path, netid_for
 
 QUEUES = ["ePrint-Ricoh-BW", "ePrint-Ricoh-Color", "ePrint-Lexmark-BW"]
+QUEUE_DESCRIPTIONS = [
+    ("ePrint-Ricoh-BW",    "black & white Ricoh MP 5002"),
+    ("ePrint-Ricoh-Color", "colour Ricoh MP C4503"),
+    ("ePrint-Lexmark-BW",  "black & white Lexmark MS810"),
+]
+SIDES = ["one-sided", "two-sided-long-edge", "two-sided-short-edge"]
+# Page sizes all three PPDs agree on; each Ricoh accepts fifty-odd more.
+COMMON_MEDIA = ["Letter", "Legal", "A4", "A5", "A6", "B5", "Executive"]
 
 # CUPS queue name -> (PPD filename, queue name on the print server)
 QUEUE_PPDS = [
@@ -211,12 +215,7 @@ def cmd_test_page(args):
 
 
 def cmd_print(args):
-    """Submit files to an ePrint queue through CUPS.
-
-    A thin wrapper over lp(1): CUPS still runs the file through the filter
-    chain for the queue's PPD, so PDFs, images and text all work. Printing
-    by hand with `lp -d <queue> file.pdf` is exactly equivalent.
-    """
+    """Submit files to an ePrint queue through CUPS, by way of lp(1)."""
     cfg = load_config()
     queue = args.queue or QUEUES[0]
     if queue not in QUEUES:
@@ -246,9 +245,8 @@ def cmd_print(args):
         cmd += ["-o", "page-ranges=%s" % args.pages]
     if args.media:
         cmd += ["-o", "media=%s" % args.media]
-    # An explicit --netid has to reach the backend, which runs as lp and has
-    # no way to see our process; a job option is the only channel CUPS gives
-    # us. The backend validates it and prefers it over the stored value.
+    # The backend runs as lp and cannot see us; a job option is the only
+    # channel CUPS gives us for a one-off NetID.
     if args.netid:
         cmd += ["-o", "dku-netid=%s" % args.netid]
     for opt in args.option or []:
@@ -267,53 +265,155 @@ def cmd_print(args):
     return 0
 
 
+USAGE = "dku-eprint print [OPTION...] [FILE...]\n" \
+        "       dku-eprint <command> [OPTION...]"
+
+INTRO = """dku-eprint prints from Linux to Duke Kunshan's ePrint service.
+
+Jobs are held at the print server rather than spooled to one machine in one
+room: send a job from anywhere on the campus network, then release it with your
+DKUCard at any ePrint station."""
+
+EXAMPLES = """print a file:
+
+  dku-eprint print report.pdf
+
+two double-sided colour copies of pages 1-4 on A4, named at the station:
+
+  dku-eprint print --queue ePrint-Ricoh-Color --media A4 \\
+                   --sides two-sided-long-edge --copies 2 --pages 1-4 \\
+                   --title "Final draft" report.pdf"""
+
+OUTRO = """`dku-eprint <command> --help` describes one command. Printing goes through
+CUPS, so `lp -d ePrint-Ricoh-BW report.pdf` does the same as the first example,
+and any application's print dialog works too."""
+
+
+class HelpParser(argparse.ArgumentParser):
+    """Top level parser that leads with printing and ends with management.
+
+    Only the running order is ours; argparse renders every section from the
+    actions themselves, so nothing drifts and the colour theme still applies.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.print_parser = None
+        self.subcommands = None
+
+    def format_help(self):
+        formatter = self._get_formatter()
+        formatter.add_usage(self.usage, [], [])
+        formatter.add_text(INTRO)
+        formatter.add_text(EXAMPLES)
+
+        if self.print_parser is not None:
+            formatter.start_section("printing options (dku-eprint print)")
+            formatter.add_arguments([
+                a for a in self.print_parser._actions
+                if not isinstance(a, argparse._HelpAction)])
+            formatter.end_section()
+
+        if self.subcommands is not None:
+            formatter.start_section(
+                "setup and diagnostics (run once, or when something is wrong)")
+            formatter.add_arguments([
+                a for a in self.subcommands._choices_actions
+                if a.dest != "print"])
+            formatter.end_section()
+
+        formatter.start_section("other options")
+        formatter.add_arguments(self._optionals._group_actions)
+        formatter.end_section()
+
+        formatter.add_text(OUTRO)
+        return formatter.format_help()
+
+
 def main():
-    ap = argparse.ArgumentParser(prog="dku-eprint", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = HelpParser(prog="dku-eprint", usage=USAGE,
+                    formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--server", help="override the print server hostname")
     ap.add_argument("--netid", help="override the configured NetID")
-    sub = ap.add_subparsers(dest="command", required=True)
+    # Without parser_class the subparsers inherit HelpParser, and
+    # `dku-eprint print --help` reprints the top level help.
+    sub = ap.add_subparsers(dest="command", required=True, metavar="COMMAND",
+                            parser_class=argparse.ArgumentParser)
+    ap.subcommands = sub
 
-    p = sub.add_parser("set-netid", help="store the DKU NetID used for print jobs")
+    p = sub.add_parser(
+        "print", help="send files (PDF, images, text) to an ePrint queue",
+        description="Send files to an ePrint queue. Jobs are held at the "
+                    "server; release them with your DKUCard at any ePrint "
+                    "station.",
+        epilog="examples:\n"
+               "  dku-eprint print report.pdf\n"
+               "  dku-eprint print --queue ePrint-Ricoh-Color --media A4 \\\n"
+               "                   --sides two-sided-long-edge --copies 2 \\\n"
+               "                   --pages 1-4 report.pdf\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("files", nargs="*", metavar="FILE",
+                   help="one or more files: PDF, PostScript, images or plain "
+                        "text. '-', or no file at all, reads standard input")
+    p.add_argument("--queue", metavar="NAME", choices=QUEUES,
+                   help="which printer: %s (default %s)"
+                        % ("; ".join("%s, %s" % (name, what)
+                                     for name, what in QUEUE_DESCRIPTIONS),
+                           QUEUES[0]))
+    p.add_argument("-n", "--copies", type=int, metavar="N",
+                   help="how many copies (default 1)")
+    p.add_argument("--sides", choices=SIDES, metavar="MODE",
+                   help="single or double sided: %s (default %s)"
+                        % (", ".join(SIDES), SIDES[0]))
+    p.add_argument("--media", metavar="SIZE",
+                   help="page size: %s (default Letter). The Ricohs take many "
+                        "more, A3 and 11x17 among them; the Lexmark does not"
+                        % ", ".join(COMMON_MEDIA))
+    p.add_argument("--pages", metavar="RANGE",
+                   help="print only some pages, e.g. 1-4,7")
+    p.add_argument("-t", "--title", metavar="NAME",
+                   help="job name shown at the release station "
+                        "(default: the file name)")
+    # SUPPRESS stops this clobbering a --netid given before the subcommand.
+    p.add_argument("--netid", metavar="NETID", default=argparse.SUPPRESS,
+                   help="charge the job to another NetID, just this once")
+    p.add_argument("-o", "--option", action="append", metavar="KEY=VALUE",
+                   help="any other lp(1) option, passed straight through; "
+                        "repeatable. `lpoptions -p <queue> -l` lists what a "
+                        "given queue accepts")
+    p.set_defaults(func=cmd_print)
+    ap.print_parser = p
+
+    p = sub.add_parser("show", help="show the effective configuration")
+    p.set_defaults(func=cmd_show)
+
+    p = sub.add_parser("set-netid",
+                       help="store the NetID used for every job (needs root)")
     p.add_argument("netid")
     p.add_argument("--user", help="apply to one Unix account only")
     p.set_defaults(func=cmd_set_netid)
 
-    p = sub.add_parser("set-prompt", help="ask for the NetID every job, or never")
+    p = sub.add_parser("set-prompt",
+                       help="'never' uses the stored NetID, 'always' asks in a "
+                            "dialog for every job (needs root)")
     p.add_argument("mode", choices=["never", "always"])
     p.set_defaults(func=cmd_set_prompt)
-
-    p = sub.add_parser("show", help="print the effective configuration")
-    p.set_defaults(func=cmd_show)
 
     p = sub.add_parser("add-queues", help="create the three ePrint CUPS queues")
     p.add_argument("--ppd-dir", help="where the PPDs live (default %s)" % DEFAULT_PPD_DIR)
     p.set_defaults(func=cmd_add_queues)
 
-    p = sub.add_parser("remove-queues", help="delete the ePrint CUPS queues")
+    p = sub.add_parser("remove-queues", help="delete them again")
     p.set_defaults(func=cmd_remove_queues)
 
     p = sub.add_parser("probe", help="ask the print server what each queue requires")
     p.add_argument("--queue")
     p.set_defaults(func=cmd_probe)
 
-    p = sub.add_parser("test-page", help="send a PostScript test page")
+    p = sub.add_parser("test-page",
+                       help="send a real test page, to prove the path works")
     p.add_argument("--queue")
     p.set_defaults(func=cmd_test_page)
-
-    p = sub.add_parser("print", help="send files (PDF, images, text) to an ePrint queue")
-    p.add_argument("files", nargs="*", metavar="FILE",
-                   help="files to print; '-' or nothing reads standard input")
-    p.add_argument("--queue", help="default %s" % QUEUES[0])
-    p.add_argument("-n", "--copies", type=int)
-    p.add_argument("-t", "--title", help="job name shown at the release station")
-    p.add_argument("--sides", choices=["one-sided", "two-sided-long-edge",
-                                       "two-sided-short-edge"])
-    p.add_argument("--pages", metavar="RANGE", help="e.g. 1-4,7")
-    p.add_argument("--media", help="e.g. A4, Letter")
-    p.add_argument("-o", "--option", action="append", metavar="KEY=VALUE",
-                   help="passed straight to lp(1); repeatable")
-    p.set_defaults(func=cmd_print)
 
     args = ap.parse_args()
     return args.func(args)

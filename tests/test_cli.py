@@ -4,6 +4,7 @@ The command is a wrapper over lp(1), so what matters is the argv it builds;
 subprocess.run is stubbed out rather than actually spooling anything.
 """
 
+import argparse
 import contextlib
 import importlib.machinery
 import importlib.util
@@ -81,12 +82,32 @@ class TestPrintCommand(unittest.TestCase):
         self._parse(["--netid", "xyz789", "print", self.pdf])
         self.assertIn("dku-netid=xyz789", self.calls[0])
 
+    def test_netid_works_after_the_subcommand_too(self):
+        """The subparser's SUPPRESS default must not clobber the global one."""
+        self._parse(["print", "--netid", "xyz789", self.pdf])
+        self.assertIn("dku-netid=xyz789", self.calls[0])
+
+    def test_netid_is_optional(self):
+        self._parse(["print", self.pdf])
+        self.assertFalse([a for a in self.calls[0] if a.startswith("dku-netid=")])
+
     def test_stdin_when_no_files(self):
         self._parse(["print"])
         self.assertEqual(self.calls[0][-1], "-")
 
     def test_unknown_queue_is_rejected(self):
-        self.assertEqual(self._parse(["print", "--queue", "nope", self.pdf]), 1)
+        with self.assertRaises(SystemExit) as caught:
+            self._parse(["print", "--queue", "nope", self.pdf])
+        self.assertEqual(caught.exception.code, 2)
+        self.assertEqual(self.calls, [])
+
+    def test_unknown_queue_is_rejected_by_the_command_too(self):
+        """argparse catches it first, but cmd_print does not trust that."""
+        args = argparse.Namespace(queue="nope", files=[self.pdf], netid=None,
+                                  copies=None, title=None, sides=None,
+                                  pages=None, media=None, option=None)
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cli.cmd_print(args), 1)
         self.assertEqual(self.calls, [])
 
     def test_missing_file_is_rejected(self):
@@ -103,6 +124,62 @@ class TestPrintCommand(unittest.TestCase):
         self.config["prompt"] = "always"
         self.assertEqual(self._parse(["print", self.pdf]), 0)
         self.assertEqual(len(self.calls), 1)
+
+
+class TestTopLevelHelp(unittest.TestCase):
+    """The help is generated from the parser; check the ordering we impose."""
+
+    def setUp(self):
+        # A wide terminal keeps argparse from hyphenating the values we look for.
+        self._old_columns = os.environ.get("COLUMNS")
+        os.environ["COLUMNS"] = "200"
+        self.help = self._render(["dku-eprint", "--help"])
+
+    def tearDown(self):
+        if self._old_columns is None:
+            os.environ.pop("COLUMNS", None)
+        else:
+            os.environ["COLUMNS"] = self._old_columns
+
+    def _render(self, argv):
+        out = io.StringIO()
+        old, sys.argv = sys.argv, argv
+        try:
+            with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
+                cli.main()
+        finally:
+            sys.argv = old
+        return out.getvalue()
+
+    def test_every_print_option_appears(self):
+        for flag in ("FILE", "--queue", "--copies", "--sides", "--media",
+                     "--pages", "--title", "--netid", "--option"):
+            self.assertIn(flag, self.help)
+
+    def test_queues_and_sides_appear(self):
+        for value in cli.QUEUES + cli.SIDES:
+            self.assertIn(value, self.help)
+
+    def test_management_commands_come_last(self):
+        printing = self.help.index("printing options")
+        management = self.help.index("setup and diagnostics")
+        self.assertLess(printing, management)
+        for command in ("show", "set-netid", "set-prompt", "add-queues",
+                        "remove-queues", "probe", "test-page"):
+            self.assertGreater(self.help.index(command), printing)
+
+    def test_examples_come_before_the_options(self):
+        self.assertLess(self.help.index("dku-eprint print report.pdf"),
+                        self.help.index("printing options"))
+
+    def test_print_is_not_listed_as_a_management_command(self):
+        management = self.help[self.help.index("setup and diagnostics"):]
+        self.assertNotIn("\n  print ", management)
+
+    def test_subcommand_help_is_not_the_top_level_help(self):
+        out = self._render(["dku-eprint", "print", "--help"])
+        self.assertIn("usage: dku-eprint print", out)
+        self.assertNotIn("setup and diagnostics", out)
 
 
 if __name__ == "__main__":
