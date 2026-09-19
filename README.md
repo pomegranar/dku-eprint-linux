@@ -41,7 +41,7 @@ Verify:
 ```sh
 dku-eprint probe        # ask the server what each queue requires
 dku-eprint test-page    # send a real test page
-lp -d ePrint-Ricoh-BW file.pdf
+dku-eprint print file.pdf
 ```
 
 Remove it with `sudo ./uninstall.sh` (add `--purge` to drop the config too).
@@ -71,6 +71,27 @@ that appears, and collect the job with your DKUCard.
 
 If `cupsd` was not running at install time the queues cannot be created, and
 the package says so; finish with `sudo dku-eprint add-queues`.
+
+## Printing
+
+```sh
+dku-eprint print report.pdf                        # default queue, ePrint-Ricoh-BW
+dku-eprint print --queue ePrint-Ricoh-Color *.pdf  # colour
+dku-eprint print -n 2 --sides two-sided-long-edge --pages 1-4 report.pdf
+dku-eprint print --netid xyz789 report.pdf         # charge someone else's account
+cat report.pdf | dku-eprint print                  # standard input
+```
+
+Anything `lp(1)` understands can be passed through with `-o`, and `dku-eprint
+print` is itself only a wrapper over `lp`, so this remains equivalent:
+
+```sh
+lp -d ePrint-Ricoh-BW report.pdf
+```
+
+Either way the file goes through the CUPS filter chain for the queue's PPD, so
+PDFs, images and plain text all print. Jobs are held at the server; release
+them with your DKUCard at any ePrint station.
 
 ## Requirements
 
@@ -198,7 +219,7 @@ stub LPD server. They need no network and touch nothing outside `/tmp`.
 src/eprint_pharos.py   protocol library (popup protocol, block builder, LPD)
 src/eprint_config.py   config file handling
 src/popup              the CUPS backend
-src/dku-eprint         admin/diagnostic CLI
+src/dku-eprint         CLI: printing, configuration, diagnostics
 src/dku-eprint-agent   per-user dialog agent for prompt = always
 packaging/             rpm spec, debian/, PKGBUILD, systemd user unit
 vendor/ppd/            PPDs from MACePrint.dmg, unmodified

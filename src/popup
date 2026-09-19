@@ -17,7 +17,8 @@ Where the NetID comes from depends on the 'prompt' setting in eprint.conf:
                    own, so it cannot open a window itself
 
 If the agent cannot be reached, the stored netid is used as a fallback so that
-printing keeps working when someone is logged in over SSH.
+printing keeps working when someone is logged in over SSH.  A job submitted
+with `-o dku-netid=<netid>` overrides both.
 
 Exit codes follow CUPS convention: 0 ok, 1 failed, 2 auth required, 5 retry.
 """
@@ -192,7 +193,14 @@ def main(argv):
     stored = netid_for(config, cups_user)
     netid = stored
 
-    if (config.get("prompt") or "never").strip().lower() == "always":
+    # `dku-eprint print --netid` has no other way to reach us: the backend runs
+    # as lp, in no session, so an explicit per-job NetID travels as a job
+    # option. It wins over the stored value and skips the dialog.
+    requested = options.get("dku-netid")
+    if requested:
+        log("DEBUG", "popup - using NetID from job option")
+        netid = requested
+    elif (config.get("prompt") or "never").strip().lower() == "always":
         question = "Please enter your DKU NetID"
         reply = ask_agent(cups_user, queue, question, stored)
         if reply is None:

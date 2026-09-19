@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Admin/diagnostic CLI for the DKU ePrint Linux driver.
+"""Printing, configuration and diagnostic CLI for the DKU ePrint Linux driver.
 
     dku-eprint set-netid <netid> [--user UNIX_USER]
     dku-eprint set-prompt never|always
@@ -8,6 +8,7 @@
     dku-eprint remove-queues
     dku-eprint probe [--queue NAME]
     dku-eprint test-page [--queue NAME]
+    dku-eprint print [--queue NAME] [--copies N] FILE...
 """
 
 import argparse
@@ -209,6 +210,63 @@ def cmd_test_page(args):
     return 0
 
 
+def cmd_print(args):
+    """Submit files to an ePrint queue through CUPS.
+
+    A thin wrapper over lp(1): CUPS still runs the file through the filter
+    chain for the queue's PPD, so PDFs, images and text all work. Printing
+    by hand with `lp -d <queue> file.pdf` is exactly equivalent.
+    """
+    cfg = load_config()
+    queue = args.queue or QUEUES[0]
+    if queue not in QUEUES:
+        sys.stderr.write("error: unknown queue %r (choose from %s)\n"
+                         % (queue, ", ".join(QUEUES)))
+        return 1
+
+    files = args.files or ["-"]
+    for path in files:
+        if path != "-" and not os.path.isfile(path):
+            sys.stderr.write("error: no such file: %s\n" % path)
+            return 1
+
+    netid = args.netid or netid_for(cfg, os.environ.get("USER", ""))
+    if not netid and (cfg.get("prompt") or "never").strip().lower() != "always":
+        sys.stderr.write("error: no NetID configured; run 'dku-eprint set-netid <netid>'\n")
+        return 1
+
+    cmd = ["lp", "-d", queue]
+    if args.title:
+        cmd += ["-t", args.title]
+    if args.copies:
+        cmd += ["-n", str(args.copies)]
+    if args.sides:
+        cmd += ["-o", "sides=%s" % args.sides]
+    if args.pages:
+        cmd += ["-o", "page-ranges=%s" % args.pages]
+    if args.media:
+        cmd += ["-o", "media=%s" % args.media]
+    # An explicit --netid has to reach the backend, which runs as lp and has
+    # no way to see our process; a job option is the only channel CUPS gives
+    # us. The backend validates it and prefers it over the stored value.
+    if args.netid:
+        cmd += ["-o", "dku-netid=%s" % args.netid]
+    for opt in args.option or []:
+        cmd += ["-o", opt]
+    cmd += ["--"] + files
+
+    try:
+        proc = subprocess.run(cmd)
+    except FileNotFoundError:
+        sys.stderr.write("error: lp not found; install the CUPS client tools\n")
+        return 1
+    if proc.returncode != 0:
+        return proc.returncode
+
+    print("Release it with your DKUCard at any ePrint station.")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(prog="dku-eprint", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -242,6 +300,20 @@ def main():
     p = sub.add_parser("test-page", help="send a PostScript test page")
     p.add_argument("--queue")
     p.set_defaults(func=cmd_test_page)
+
+    p = sub.add_parser("print", help="send files (PDF, images, text) to an ePrint queue")
+    p.add_argument("files", nargs="*", metavar="FILE",
+                   help="files to print; '-' or nothing reads standard input")
+    p.add_argument("--queue", help="default %s" % QUEUES[0])
+    p.add_argument("-n", "--copies", type=int)
+    p.add_argument("-t", "--title", help="job name shown at the release station")
+    p.add_argument("--sides", choices=["one-sided", "two-sided-long-edge",
+                                       "two-sided-short-edge"])
+    p.add_argument("--pages", metavar="RANGE", help="e.g. 1-4,7")
+    p.add_argument("--media", help="e.g. A4, Letter")
+    p.add_argument("-o", "--option", action="append", metavar="KEY=VALUE",
+                   help="passed straight to lp(1); repeatable")
+    p.set_defaults(func=cmd_print)
 
     args = ap.parse_args()
     return args.func(args)

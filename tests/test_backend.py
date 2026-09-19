@@ -122,7 +122,7 @@ class TestOptionParsing(unittest.TestCase):
 
 
 class TestBackendRun(unittest.TestCase):
-    def _run(self, env_extra, argv_extra, job_bytes=b"%!PS\nshowpage\n"):
+    def _run(self, env_extra, argv_extra, job_bytes=b"%!PS\nshowpage\n", options=""):
         server = StubLPD()
         server.start()
 
@@ -140,7 +140,7 @@ class TestBackendRun(unittest.TestCase):
         env.update(env_extra)
 
         argv = [sys.executable, os.path.join(SRC, "popup"),
-                "42", "alice", "report.pdf", "1", ""] + argv_extra + [job_path]
+                "42", "alice", "report.pdf", "1", options] + argv_extra + [job_path]
         proc = subprocess.run(argv, env=env, capture_output=True, timeout=60)
         server.join(timeout=10)
         os.unlink(job_path)
@@ -176,6 +176,18 @@ class TestBackendRun(unittest.TestCase):
         body = p.rc4(p.POPUP_RC4_KEY, server.data[32:32 + block_len])
         s23 = int(server.data[20:25])
         self.assertIn(b"Username\x00testnetid\x00", body[:s23])
+
+    def test_job_option_overrides_stored_netid(self):
+        """`dku-eprint print --netid` reaches the backend as -o dku-netid=..."""
+        proc, server = self._run({}, [], options="dku-netid=override1")
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode())
+        self.assertIn(b"Poverride1\n", server.control)
+        self.assertNotIn(b"Ptestnetid\n", server.control)
+
+    def test_malformed_job_option_netid_is_refused(self):
+        proc, _ = self._run({}, [], options="dku-netid=bad;name")
+        self.assertEqual(proc.returncode, popup_backend.CUPS_BACKEND_FAILED)
+        self.assertIn(b"refusing malformed NetID", proc.stderr)
 
     def test_missing_netid_requests_auth(self):
         conf = tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False)
