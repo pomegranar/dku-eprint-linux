@@ -14,7 +14,7 @@ that expects an opaque **popup block** to be prepended to the print data. The
 block carries who is printing and the answers to whatever questions the queue is
 configured to ask.
 
-A second, separate service — the **popup server** on TCP 28203 — exists only so
+A second, separate service, the **popup server** on TCP 28203, exists only so
 the client can discover what those questions are. The print data never goes
 through it.
 
@@ -39,9 +39,9 @@ feed), including a trailing separator after the last field.
  └───────────┴──────────┴──────┴────────────┴──────┴─────────────────┘
 ```
 
-* `version` — client sends `1003`; DKU's server answers `1005`. The client
+* `version`: client sends `1003`; DKU's server answers `1005`. The client
   caps the version it echoes at `1005`.
-* `length` — zero-padded decimal, **including the 19-byte header**.
+* `length`: zero-padded decimal, **including the 19-byte header**.
 * Field 0 of a response echoes the request verb.
 
 `-[PUClient packetHeaderLength]` computes `7 + 4 + 1 + 6 + 1 = 19`.
@@ -56,7 +56,7 @@ sensitive, and the popup block does not use the session key either (see §3).
 |---|---|---|
 | `INITNEWJOB` | hostname, device name, queue, username, job name | verb, transaction, allows-last-answers, NetBIOS name, ?, config flags |
 | `GETNEXTDESCRIPTOR` | transaction | verb + 12 descriptor fields, or bare verb when exhausted |
-| `GETPUBLICKEY` | — | verb, modulus (hex), exponent (hex) |
+| `GETPUBLICKEY` | none | verb, modulus (hex), exponent (hex) |
 | `SETSESSIONKEY` | wrapped key (hex) | verb |
 
 `device name` is the **print server's dotted-quad IP**, not the printer's:
@@ -85,7 +85,7 @@ flags           8
 
 ## 2. Key wrapping ("NotRsa")
 
-`+[PUNotRsa notRsaEncryptData:withModulus:exponent:]` is textbook RSA — a bare
+`+[PUNotRsa notRsaEncryptData:withModulus:exponent:]` is textbook RSA: a bare
 modular exponentiation with **no PKCS#1 padding**:
 
 1. If the payload's first byte is `0x00` or `0x01`, prepend `0x01`
@@ -117,13 +117,13 @@ at `0x10000b819`:
 | 0  | 8 | `C0 C1 C2 C3 C4 C5 C6 C7` |
 | 8  | 7 | body length, `%07d` |
 | 15 | 1 | `0x00` |
-| 16 | 4 | `"154\0"` — block format version |
+| 16 | 4 | `"154\0"`, block format version |
 | 20 | 5 | `section23Length`, `%05d` |
 | 25 | 1 | `0x00` |
 | 26 | 5 | `section4Length`, `%05d` |
 | 31 | 1 | `0x00` |
 
-`section23Length` is everything before the XML section — that is,
+`section23Length` is everything before the XML section, that is,
 `len(section 1) + len(answers) + len(notify block)`. `section4Length` is the
 length of the XML section alone. The two sum to the body length.
 
@@ -131,14 +131,14 @@ length of the XML section alone. The two sum to the body length.
 
 Concatenation of four parts, RC4-encrypted as a whole:
 
-**Section 1 — job data** (`+[PUBlockBuilder jobDataBlock]`). Four NUL-terminated
+**Section 1: job data** (`+[PUBlockBuilder jobDataBlock]`). Four NUL-terminated
 ASCII strings:
 
 ```
 hostname \0 username \0 jobname \0 sidesImaged \0
 ```
 
-**Sections 2 & 3 — answers** (`+[PUBlockBuilder answerBlockForDescriptors:]`).
+**Sections 2 & 3: answers** (`+[PUBlockBuilder answerBlockForDescriptors:]`).
 One record per descriptor. Descriptors of type `Guest` with an empty answer are
 skipped.
 
@@ -152,7 +152,7 @@ to `ps waxoucomm | grep Notify | grep -v grep`; if no Pharos Notify daemon is
 running it emits **nothing**. There is no Notify daemon on Linux, so this driver
 always emits an empty block.
 
-**Section 4 — XML properties** (`+[PUBlockBuilder XMLPropertiesBlock]`). Pharos
+**Section 4: XML properties** (`+[PUBlockBuilder XMLPropertiesBlock]`). Pharos
 AppTracker accounting metadata, ASCII, **no trailing NUL**:
 
 ```
@@ -174,7 +174,7 @@ Standard RC4 (`rc4_prepare_key` at `0x10000ec7f` is a textbook KSA) with a
 42 95 f2 a7 68 05 11 b4 c3 74 39 e1 d2 66 57 94
 ```
 
-This is obfuscation, not encryption — the key ships in every Pharos client and
+This is obfuscation, not encryption. The key ships in every Pharos client and
 server. It is *not* the negotiated session key, which is why the popup block can
 be built without ever talking to the popup server.
 

@@ -76,7 +76,7 @@ class StubAgent(threading.Thread):
 
 class TestNetIDValidation(unittest.TestCase):
     def test_accepts_ordinary_netids(self):
-        for good in ("abc123", "an301", "a.b-c_d", "x" * 64):
+        for good in ("abc123", "xyz789", "a.b-c_d", "x" * 64):
             self.assertTrue(valid_netid(good), good)
 
     def test_rejects_empty_and_overlong(self):

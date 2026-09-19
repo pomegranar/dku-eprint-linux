@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: Anar Nyambayar <anar.nyambayar@gmail.com>
 Build-Depends: debhelper-compat (= 13)
 Standards-Version: 4.6.2
-Homepage: https://github.com/anar/linux-eprint
+Homepage: https://github.com/pomegranar/dku-eprint-linux
 
 Package: dku-eprint
 Architecture: all

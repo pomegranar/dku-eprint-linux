@@ -1,6 +1,6 @@
 [Unit]
 Description=DKU ePrint NetID popup agent
-Documentation=https://github.com/
+Documentation=https://github.com/pomegranar/dku-eprint-linux
 PartOf=graphical-session.target
 After=graphical-session.target
 

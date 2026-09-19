@@ -20,12 +20,13 @@ station, exactly as with the macOS client.
 One command, on Debian/Ubuntu, Fedora/RHEL or Arch:
 
 ```sh
-git clone <this repo> && cd linux-eprint && sudo ./install.sh
+git clone https://github.com/pomegranar/dku-eprint-linux
+cd dku-eprint-linux && sudo ./install.sh
 ```
 
 It installs any missing dependencies with your distro's package manager, sets
-up the backend and PPDs, creates the three queues — `ePrint-Ricoh-BW`,
-`ePrint-Ricoh-Color`, `ePrint-Lexmark-BW`, matching the macOS installer — and
+up the backend and PPDs, creates the three queues (`ePrint-Ricoh-BW`,
+`ePrint-Ricoh-Color`, `ePrint-Lexmark-BW`, matching the macOS installer), and
 asks how you want to supply your NetID.
 
 Non-interactive:
@@ -53,19 +54,29 @@ make deb     # Debian/Ubuntu -> ../dku-eprint_1.0.0*.deb
 make arch    # Arch          -> build/arch/
 ```
 
+> **Only the RPM has actually been built and inspected.** The `debian/` files and
+> the `PKGBUILD` are written to spec and syntax-checked, but they have never been
+> run: the machine this was developed on has no `dpkg-buildpackage` or `makepkg`.
+> Treat `make deb` and `make arch` as untested, and expect to fix something the
+> first time you build them.
+>
+> The same caveat applies more weakly to `install.sh`: it was developed and run
+> on Fedora, so the apt and pacman branches of its dependency handling have not
+> been exercised on a real machine either. Reports and patches welcome.
+
 Then `sudo dku-eprint set-netid <netid>` and `sudo dku-eprint add-queues`,
 since a package should not create printers for you at install time.
 
 ## Requirements
 
-* CUPS and `python3` (standard library only — no third-party packages)
+* CUPS and `python3` (standard library only, no third-party packages)
 * Network reach to `dku-ep-ps2-pap1.oit.duke.edu` on TCP **515** and **28203**
 
 ### VPNs and split tunnelling
 
 The print server is on campus RFC 1918 space (`10.0.0.0/8`). If you run a VPN
-that captures the default route — a Tailscale exit node, WireGuard with
-`AllowedIPs = 0.0.0.0/0`, a corporate client — campus traffic gets tunnelled off
+that captures the default route (a Tailscale exit node, WireGuard with
+`AllowedIPs = 0.0.0.0/0`, a corporate client), campus traffic gets tunnelled off
 site and the printer looks dead.
 
 The only thing that matters is that the server resolves via your LAN interface:
@@ -75,7 +86,7 @@ ip route get "$(getent hosts dku-ep-ps2-pap1.oit.duke.edu | awk '{print $1}')"
 # want: 'dev <your LAN interface>', not 'dev tailscale0' / 'dev wg0'
 ```
 
-If it points at the tunnel, you don't need to disconnect — just exempt the
+If it points at the tunnel, you don't need to disconnect. Just exempt the
 campus range. For Tailscale, its own rules sit at priorities 5210-5270, so a
 lower number wins:
 
@@ -87,7 +98,7 @@ Note that Tailscale's `--exit-node-allow-lan-access` alone is usually *not*
 enough: it adds a `throw` route for your immediate subnet only, and the print
 server generally lives on a different one.
 
-`ip rule` changes are **runtime only** — lost on reboot and on VPN restart. To
+`ip rule` changes are **runtime only**: lost on reboot and on VPN restart. To
 persist, use a NetworkManager dispatcher script
 (`/etc/NetworkManager/dispatcher.d/`) or a small systemd unit. If printing works
 today but breaks after a reboot, check this first:
@@ -135,13 +146,13 @@ sudo dku-eprint set-prompt always
 systemctl --user enable --now dku-eprint-agent.service   # as your own user
 ```
 
-A CUPS backend cannot open a window itself — it runs as root with no session,
+A CUPS backend cannot open a window itself. It runs as root with no session,
 no display, and often before you are back at the machine. So the same split the
 macOS client uses applies here: `dku-eprint-agent` runs inside your desktop
 session, and the backend hands it the question over a socket in
 `$XDG_RUNTIME_DIR`. It shows the dialog with `zenity` or `kdialog`.
 
-If the agent is not running — headless, SSH, or a different user — the backend
+If the agent is not running (headless, SSH, or a different user), the backend
 logs a warning and falls back to the stored NetID rather than failing the job.
 Cancelling the dialog cancels the print, quietly.
 
@@ -157,8 +168,8 @@ what those questions are.
 
 For DKU, every queue asks exactly one: *"Please enter your DKU NetID"*.
 
-The full wire format — packet framing, the 32-byte block header, the four body
-sections, and the RC4 obfuscation — is documented in
+The full wire format (packet framing, the 32-byte block header, the four body
+sections, and the RC4 obfuscation) is documented in
 [`docs/PROTOCOL.md`](docs/PROTOCOL.md), along with how it was recovered from the
 vendor binary.
 
@@ -191,7 +202,7 @@ THIRD-PARTY.md         provenance of vendor PPDs and the RE basis
 
 ## License
 
-The original work here — `src/`, `tests/`, `docs/`, and the install scripts —
+The original work here (`src/`, `tests/`, `docs/`, and the install scripts)
 is MIT licensed. See [`LICENSE`](LICENSE).
 
 The PPDs in `vendor/ppd/` are Ricoh's and Lexmark's, redistributed unmodified
@@ -208,4 +219,4 @@ Lexmark, Duke University, or Duke Kunshan University.
   server accepts plaintext, which is the vendor client's own documented
   fallback.
 * Cost-centre and guest-account question types are encoded per the vendor format
-  but are untested — DKU's queues don't use them.
+  but are untested. DKU's queues don't use them.

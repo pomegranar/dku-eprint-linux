@@ -1,8 +1,15 @@
-build/
-*.o
-*.tmp
+# Build artefacts. Anchored to the repo root so packaging/debian/ is unaffected
+# by the top-level debian/ that `make deb` creates.
+/build/
+/dist/
+/debian/
+
 __pycache__/
 *.pyc
-build/
-dist/
-debian/
+*.o
+*.tmp
+
+# Agent instruction files are personal, never publish them.
+AGENTS.md
+CLAUDE.md
+.claude/

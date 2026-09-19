@@ -16,7 +16,7 @@ They are **not** covered by this project's MIT license and are not the
 project author's to relicense. They are redistributed for interoperability
 under their respective vendors' terms. PPDs are conventionally distributed
 with printer drivers for exactly this purpose, but if you are repackaging this
-project — for a distribution, or commercially — review those terms yourself.
+project, for a distribution or commercially, review those terms yourself.
 
 If you would rather not redistribute them, delete `vendor/ppd/` and point
 `install.sh` at PPDs you obtain yourself:
@@ -36,8 +36,8 @@ documented here was recovered by analysing the macOS Pharos Popup Client
 live print server.
 
 No vendor code is copied or redistributed in this repository. The
-documentation describes wire formats — facts about how bytes are arranged on a
-network connection — which are not themselves copyrightable, and the
+documentation describes wire formats, facts about how bytes are arranged on a
+network connection, which are not themselves copyrightable, and the
 implementation in `src/` was written from that documentation.
 
 Reverse engineering for the purpose of achieving interoperability is expressly

@@ -4,7 +4,7 @@ Release:        1%{?dist}
 Summary:        Linux CUPS driver for the DKU ePrint (Pharos Uniprint) service
 
 License:        MIT
-URL:            https://github.com/anar/linux-eprint
+URL:            https://github.com/pomegranar/dku-eprint-linux
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      noarch
 
