@@ -1,0 +1,188 @@
+#!/usr/bin/python3
+"""CUPS backend for Pharos Uniprint "popup" queues (DKU ePrint).
+
+Replaces the macOS Pharos Popup Client's backend of the same name.  CUPS
+invokes it as:
+
+    popup job-id user title copies options [file]
+
+with DEVICE_URI set to popup://<print-server>/<queue>.
+
+The macOS client pops up a window asking for the NetID.  A CUPS backend has no
+usable way to do that: it runs as the 'lp' user, detached from any session, and
+often before the user is even at the machine.  So the NetID comes from
+configuration instead -- see dku-eprint(1) and eprint.conf.
+
+Exit codes follow CUPS convention: 0 ok, 1 failed, 2 auth required, 5 retry.
+"""
+
+import os
+import sys
+import socket
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__))))
+sys.path.insert(0, "/usr/share/dku-eprint")
+
+import eprint_pharos as pharos
+from eprint_config import load_config, netid_for
+
+CUPS_BACKEND_OK = 0
+CUPS_BACKEND_FAILED = 1
+CUPS_BACKEND_AUTH_REQUIRED = 2
+CUPS_BACKEND_RETRY_CURRENT_JOB = 5
+
+
+def log(level, msg):
+    sys.stderr.write("%s: %s\n" % (level, msg))
+    sys.stderr.flush()
+
+
+def discovery():
+    """`lpinfo -v` calls the backend with no arguments."""
+    sys.stdout.write('network popup "Unknown" "Pharos Print Server"\n')
+    return CUPS_BACKEND_OK
+
+
+def parse_device_uri(uri):
+    """popup://host[:port]/queue -> (host, port, queue)"""
+    if "://" not in uri:
+        raise ValueError("device URI has no scheme: %r" % uri)
+    rest = uri.split("://", 1)[1]
+    hostpart, _, path = rest.partition("/")
+    queue = path.strip("/").split("/")[-1]
+    if not queue:
+        raise ValueError("device URI has no queue name: %r" % uri)
+    if ":" in hostpart:
+        host, _, port = hostpart.rpartition(":")
+        return host, int(port), queue
+    return hostpart, pharos.DEFAULT_LPD_PORT, queue
+
+
+def parse_options(raw):
+    """CUPS passes options as a space separated key=value list."""
+    opts = {}
+    for token in (raw or "").split():
+        key, _, value = token.partition("=")
+        opts[key] = value
+    return opts
+
+
+def read_job(path):
+    if path:
+        with open(path, "rb") as fh:
+            log("DEBUG", "popup - reading print data from %s" % path)
+            return fh.read()
+    log("DEBUG", "popup - reading print data from standard input")
+    return sys.stdin.buffer.read()
+
+
+def resolve_descriptors(host, queue, username, jobname, hostname, device_name):
+    """Ask the print server what it wants to know, and answer it.
+
+    If the server is unreachable we fall back to the single Username question
+    every DKU ePrint queue asks, rather than failing the job outright.
+    """
+    try:
+        job, descriptors = pharos.query_queue(
+            host, queue, username, jobname,
+            hostname=hostname, device_name=device_name)
+        log("DEBUG", "popup - server transaction %s, %d question(s)"
+            % (job["transaction"], len(descriptors)))
+    except (OSError, pharos.PopupError) as exc:
+        log("WARNING", "popup - could not query popup server (%s); "
+                       "assuming a single Username question" % exc)
+        descriptors = [{"name": "Username", "type": "String",
+                        "hierarchy_level": "", "mandatory": "1", "answer": ""}]
+        job = None
+
+    for d in descriptors:
+        if d.get("type") == "Guest":
+            continue
+        d["answer"] = username
+    return job, descriptors
+
+
+def main(argv):
+    if len(argv) == 1:
+        return discovery()
+    if len(argv) not in (6, 7):
+        log("ERROR", "popup - expected 6 or 7 arguments, received %d" % len(argv))
+        return CUPS_BACKEND_FAILED
+
+    job_id, cups_user, title, copies, raw_options = argv[1:6]
+    job_file = argv[6] if len(argv) == 7 else None
+
+    device_uri = os.environ.get("DEVICE_URI", "")
+    if not device_uri:
+        log("ERROR", "popup - DEVICE_URI is not set")
+        return CUPS_BACKEND_FAILED
+
+    try:
+        host, port, queue = parse_device_uri(device_uri)
+    except ValueError as exc:
+        log("ERROR", "popup - %s" % exc)
+        return CUPS_BACKEND_FAILED
+
+    options = parse_options(raw_options)
+    if options.get("job-hold-until") == "auth-info-required":
+        return CUPS_BACKEND_AUTH_REQUIRED
+
+    config = load_config()
+    netid = netid_for(config, cups_user)
+    if not netid:
+        log("ERROR", "popup - no DKU NetID configured for user '%s'. "
+                     "Run: dku-eprint set-netid <netid>" % cups_user)
+        log("STATE", "+cups-missing-credentials")
+        return CUPS_BACKEND_AUTH_REQUIRED
+    log("STATE", "-cups-missing-credentials")
+
+    hostname = config.get("hostname") or socket.gethostname()
+    jobname = title or "Print Job"
+    device_name = pharos.resolve_device_name(host)
+
+    log("INFO", "Processing print job")
+    _, descriptors = resolve_descriptors(
+        host, queue, netid, jobname, hostname, device_name)
+
+    try:
+        data = read_job(job_file)
+    except OSError as exc:
+        log("ERROR", "popup - failed to read job data: %s" % exc)
+        return CUPS_BACKEND_FAILED
+    if not data:
+        log("ERROR", "popup - job contained no data")
+        return CUPS_BACKEND_FAILED
+
+    block = pharos.build_popup_block(
+        hostname=hostname,
+        username=netid,
+        jobname=jobname,
+        descriptors=descriptors,
+        application=options.get("AppName", "cups"),
+        sides_imaged=0,
+        copies=int(copies or 1),
+    )
+    log("DEBUG", "popup - built %d byte popup block for queue %s"
+        % (len(block), queue))
+
+    log("INFO", "Sending print job to %s" % host)
+    try:
+        pharos.lpd_send(host, queue, netid, jobname, block + data,
+                        port=port, hostname=hostname, job_id=job_id)
+    except (OSError, pharos.PopupError) as exc:
+        log("ERROR", "popup - could not deliver job to LPD server: %s" % exc)
+        return CUPS_BACKEND_RETRY_CURRENT_JOB
+
+    log("INFO", "Print job accepted by %s" % host)
+    log("DEBUG", "popup - done")
+    return CUPS_BACKEND_OK
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv))
+    except KeyboardInterrupt:
+        sys.exit(CUPS_BACKEND_FAILED)
+    except Exception as exc:  # never let a traceback become a stuck queue
+        log("ERROR", "popup - unhandled error: %s" % exc)
+        sys.exit(CUPS_BACKEND_FAILED)

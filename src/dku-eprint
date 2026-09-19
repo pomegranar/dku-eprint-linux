@@ -1,0 +1,168 @@
+#!/usr/bin/python3
+"""Admin/diagnostic CLI for the DKU ePrint Linux driver.
+
+    dku-eprint set-netid <netid> [--user UNIX_USER]
+    dku-eprint show
+    dku-eprint probe [--queue NAME]
+    dku-eprint test-page [--queue NAME]
+"""
+
+import argparse
+import os
+import socket
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__))))
+sys.path.insert(0, "/usr/share/dku-eprint")
+
+import eprint_pharos as pharos
+from eprint_config import load_config, write_config, config_path, netid_for
+
+QUEUES = ["ePrint-Ricoh-BW", "ePrint-Ricoh-Color", "ePrint-Lexmark-BW"]
+
+# Placeholders are @NAME@ rather than %s: PostScript uses % for comments, so
+# %-formatting would choke on the "%!PS" header.
+TEST_PAGE = b"""%!PS-Adobe-3.0
+/Helvetica-Bold findfont 20 scalefont setfont
+72 700 moveto (DKU ePrint - Linux driver test page) show
+/Helvetica findfont 12 scalefont setfont
+72 670 moveto (NetID: @NETID@) show
+72 650 moveto (Host: @HOST@) show
+72 630 moveto (Queue: @QUEUE@) show
+72 600 moveto (If you can read this, the popup block was accepted.) show
+showpage
+"""
+
+
+def ps_escape(text):
+    """Escape a value for a PostScript literal string."""
+    out = str(text)
+    for char, repl in (("\\", r"\\"), ("(", r"\("), (")", r"\)")):
+        out = out.replace(char, repl)
+    return out.encode("ascii", "replace")
+
+
+def render_test_page(netid, hostname, queue):
+    page = TEST_PAGE
+    for token, value in ((b"@NETID@", netid), (b"@HOST@", hostname), (b"@QUEUE@", queue)):
+        page = page.replace(token, ps_escape(value))
+    return page
+
+
+def cmd_set_netid(args):
+    cfg = load_config()
+    if args.user:
+        cfg.setdefault("users", {})[args.user] = args.netid
+    else:
+        cfg["netid"] = args.netid
+    try:
+        path = write_config(cfg)
+    except PermissionError:
+        sys.stderr.write("error: need root to write %s (try sudo)\n" % config_path())
+        return 1
+    print("Wrote %s" % path)
+    return 0
+
+
+def cmd_show(args):
+    cfg = load_config()
+    print("config file : %s" % config_path())
+    print("server      : %s" % cfg.get("server"))
+    print("netid       : %s" % (cfg.get("netid") or "(unset)"))
+    for user, netid in sorted((cfg.get("users") or {}).items()):
+        print("  %-10s: %s" % (user, netid))
+    effective = netid_for(cfg, os.environ.get("USER", ""))
+    print("effective   : %s" % (effective or "(unset)"))
+    return 0
+
+
+def cmd_probe(args):
+    cfg = load_config()
+    server = args.server or cfg.get("server")
+    netid = args.netid or netid_for(cfg, os.environ.get("USER", "")) or "probe"
+    queues = [args.queue] if args.queue else QUEUES
+
+    print("Probing %s as '%s'\n" % (server, netid))
+    rc = 0
+    for queue in queues:
+        try:
+            job, descriptors = pharos.query_queue(server, queue, netid, "probe")
+        except (OSError, pharos.PopupError) as exc:
+            print("  %-20s FAIL  %s" % (queue, exc))
+            rc = 1
+            continue
+        print("  %-20s ok    transaction %s, server %s"
+              % (queue, job["transaction"], job["netbios_name"]))
+        for d in descriptors:
+            print("      question: %s (%s, max %s chars)%s"
+                  % (d["name"], d["type"], d["length"],
+                     "  mandatory" if d["mandatory"] == "1" else ""))
+            print("      prompt  : %s" % d["prompt"])
+    return rc
+
+
+def cmd_test_page(args):
+    cfg = load_config()
+    server = args.server or cfg.get("server")
+    netid = args.netid or netid_for(cfg, os.environ.get("USER", ""))
+    if not netid:
+        sys.stderr.write("error: no NetID configured; run 'dku-eprint set-netid <netid>'\n")
+        return 1
+    queue = args.queue or QUEUES[0]
+    hostname = cfg.get("hostname") or socket.gethostname()
+
+    try:
+        _, descriptors = pharos.query_queue(server, queue, netid, "Linux test page")
+    except (OSError, pharos.PopupError) as exc:
+        sys.stderr.write("error: could not reach popup server: %s\n" % exc)
+        return 1
+    for d in descriptors:
+        d["answer"] = netid
+
+    payload = render_test_page(netid, hostname, queue)
+    block = pharos.build_popup_block(hostname, netid, "Linux test page",
+                                     descriptors, application="dku-eprint")
+    try:
+        pharos.lpd_send(server, queue, netid, "Linux test page", block + payload,
+                        hostname=hostname)
+    except (OSError, pharos.PopupError) as exc:
+        sys.stderr.write("error: LPD delivery failed: %s\n" % exc)
+        return 1
+
+    print("Test page sent to %s on %s as '%s'." % (queue, server, netid))
+    print("Release it with your DKUCard at any ePrint station.")
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="dku-eprint", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--server", help="override the print server hostname")
+    ap.add_argument("--netid", help="override the configured NetID")
+    sub = ap.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("set-netid", help="store the DKU NetID used for print jobs")
+    p.add_argument("netid")
+    p.add_argument("--user", help="apply to one Unix account only")
+    p.set_defaults(func=cmd_set_netid)
+
+    p = sub.add_parser("show", help="print the effective configuration")
+    p.set_defaults(func=cmd_show)
+
+    p = sub.add_parser("probe", help="ask the print server what each queue requires")
+    p.add_argument("--queue")
+    p.set_defaults(func=cmd_probe)
+
+    p = sub.add_parser("test-page", help="send a PostScript test page")
+    p.add_argument("--queue")
+    p.set_defaults(func=cmd_test_page)
+
+    args = ap.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)
