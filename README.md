@@ -41,7 +41,7 @@ Verify:
 ```sh
 dku-eprint probe        # ask the server what each queue requires
 dku-eprint test-page    # send a real test page
-dku-eprint print file.pdf
+dku-eprint print README.pdf
 ```
 
 Remove it with `sudo ./uninstall.sh` (add `--purge` to drop the config too).
@@ -75,7 +75,7 @@ the package says so; finish with `sudo dku-eprint add-queues`.
 ## Printing
 
 ```sh
-dku-eprint print report.pdf                        # default queue, ePrint-Ricoh-BW
+dku-eprint print README.pdf                        # default queue, ePrint-Ricoh-BW
 dku-eprint print --queue ePrint-Ricoh-Color *.pdf  # colour
 dku-eprint print -n 2 --sides two-sided-long-edge --pages 1-4 report.pdf
 dku-eprint print --netid xyz789 report.pdf         # charge someone else's account
@@ -86,7 +86,7 @@ Anything `lp(1)` understands can be passed through with `-o`, and `dku-eprint
 print` is itself only a wrapper over `lp`, so this remains equivalent:
 
 ```sh
-lp -d ePrint-Ricoh-BW report.pdf
+lp -d ePrint-Ricoh-BW README.pdf
 ```
 
 Either way the file goes through the CUPS filter chain for the queue's PPD, so
