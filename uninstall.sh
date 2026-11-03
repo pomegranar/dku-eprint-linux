@@ -2,6 +2,13 @@
 # Remove the DKU ePrint driver.  Keeps /etc/dku-eprint unless --purge is given.
 set -euo pipefail
 
+if [[ "$(uname -s)" == Darwin ]]; then
+    rm -rf "$HOME/.local/share/dku-eprint" "$HOME/.local/bin/dku-eprint"
+    [[ "${1:-}" == "--purge" ]] && rm -rf "$HOME/.config/dku-eprint"
+    echo "Removed dku-eprint from $HOME/.local"
+    exit 0
+fi
+
 PURGE=0
 [[ "${1:-}" == "--purge" ]] && PURGE=1
 

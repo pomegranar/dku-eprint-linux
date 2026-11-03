@@ -28,6 +28,20 @@ sudo ./uninstall.sh                  # remove it (--purge drops the config too)
 You need CUPS and `python3` (standard library only), and a network path to
 `dku-ep-ps2-pap1.oit.duke.edu` on TCP **515** and **28203**.
 
+### macOS
+
+```sh
+git clone https://github.com/pomegranar/dku-eprint-linux
+cd dku-eprint-linux && ./install.sh        # no sudo; installs under ~/.local
+```
+
+macOS ships Pharos' own client, and SIP keeps anything else out of CUPS' backend
+directory, so there is no backend or queue here. `dku-eprint print` converts the
+file with `cupsfilter` and the queue's PPD, then sends it to the server itself.
+`set-netid` and `set-prompt` edit `~/.config/dku-eprint/eprint.conf`;
+`prompt = always` shows a native dialog. Printing from other apps still goes
+through the official client's queues.
+
 ## Printing
 
 ```sh

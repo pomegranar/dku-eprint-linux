@@ -33,6 +33,8 @@ class FakeProc:
 class TestPrintCommand(unittest.TestCase):
     def setUp(self):
         self.calls = []
+        self._real_direct = cli.DIRECT
+        cli.DIRECT = False  # these tests cover the lp path
         self._real_run = cli.subprocess.run
         cli.subprocess.run = lambda cmd, *a, **kw: (self.calls.append(cmd), FakeProc())[1]
 
@@ -48,6 +50,7 @@ class TestPrintCommand(unittest.TestCase):
         self.pdf = fh.name
 
     def tearDown(self):
+        cli.DIRECT = self._real_direct
         cli.subprocess.run = self._real_run
         cli.load_config = self._real_load
         os.unlink(self.pdf)

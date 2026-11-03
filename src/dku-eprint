@@ -12,6 +12,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 
 # Our own directory wins, so a git checkout stays self-consistent even when an
 # older copy is installed system-wide; /usr/share is the fallback for the
@@ -20,7 +21,8 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 sys.path.append("/usr/share/dku-eprint")
 
 import eprint_pharos as pharos
-from eprint_config import load_config, write_config, config_path, netid_for
+from eprint_config import (load_config, write_config, config_path, netid_for,
+                           valid_netid)
 
 QUEUES = ["ePrint-Ricoh-BW", "ePrint-Ricoh-Color", "ePrint-Lexmark-BW"]
 QUEUE_DESCRIPTIONS = [
@@ -39,6 +41,12 @@ QUEUE_PPDS = [
     ("ePrint-Lexmark-BW",  "MS810.ppd",                 "ePrint-Lexmark-BW"),
 ]
 DEFAULT_PPD_DIR = "/usr/share/ppd/dku-eprint"
+
+# macOS cannot take a third party CUPS backend (SIP locks the backend directory,
+# and Pharos' own client owns the name 'popup'), so there `print` filters the
+# job with cupsfilter(8) and speaks LPD itself, from the user's own process.
+DIRECT = sys.platform == "darwin"
+INSTALL_DIR = os.path.dirname(os.path.realpath(__file__))
 
 # Placeholders are @NAME@ rather than %s: PostScript uses % for comments, so
 # %-formatting would choke on the "%!PS" header.
@@ -96,13 +104,16 @@ def cmd_set_prompt(args):
         sys.stderr.write("error: need root to write %s (try sudo)\n" % config_path())
         return 1
     print("Wrote %s (prompt = %s)" % (path, args.mode))
-    if args.mode == "always":
+    if args.mode == "always" and not DIRECT:
         print("Enable the dialog agent in your desktop session with:")
         print("  systemctl --user enable --now dku-eprint-agent.service")
     return 0
 
 
 def cmd_add_queues(args):
+    if DIRECT:
+        print("Not needed on macOS: 'dku-eprint print' talks to the server directly.")
+        return 0
     cfg = load_config()
     server = args.server or cfg.get("server")
     ppd_dir = args.ppd_dir or DEFAULT_PPD_DIR
@@ -136,6 +147,9 @@ def cmd_add_queues(args):
 
 
 def cmd_remove_queues(args):
+    if DIRECT:
+        print("Nothing to remove: this tool creates no CUPS queues on macOS.")
+        return 0
     for name in QUEUES:
         proc = subprocess.run(["lpadmin", "-x", name], capture_output=True)
         if proc.returncode == 0:
@@ -214,6 +228,90 @@ def cmd_test_page(args):
     return 0
 
 
+def ask_netid_dialog(default=""):
+    """Ask for a NetID in a native macOS dialog.  None if cancelled."""
+    script = ('on run argv\n'
+              'set r to display dialog "Please enter your DKU NetID" '
+              'default answer (item 1 of argv) with title "DKU ePrint" '
+              'buttons {"Cancel", "Print"} default button "Print"\n'
+              'return text returned of r\n'
+              'end run')
+    proc = subprocess.run(["osascript", "-e", script, default or ""],
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip()
+
+
+def filter_to_postscript(path, queue, args, title, workdir):
+    """Run one file through cupsfilter with the queue's PPD; return PS bytes."""
+    ppd = dict((q, f) for q, f, _ in QUEUE_PPDS)[queue]
+    ppd_path = os.path.join(INSTALL_DIR, "ppd", ppd)
+    if not os.path.isfile(ppd_path):
+        raise RuntimeError("no PPD %s; run install.sh again" % ppd_path)
+    if path == "-":
+        path = os.path.join(workdir, "stdin")
+        with open(path, "wb") as fh:
+            fh.write(sys.stdin.buffer.read())
+    cmd = ["cupsfilter", "-m", "application/vnd.cups-postscript",
+           "-p", ppd_path, "-t", title]
+    if args.copies:
+        cmd += ["-n", str(args.copies)]
+    opts = []
+    if args.sides:
+        opts.append("sides=%s" % args.sides)
+    if args.pages:
+        opts.append("page-ranges=%s" % args.pages)
+    if args.media:
+        opts.append("media=%s" % args.media)
+    opts += args.option or []
+    for opt in opts:
+        cmd += ["-o", opt]
+    proc = subprocess.run(cmd + [path], capture_output=True)
+    if proc.returncode != 0 or not proc.stdout:
+        raise RuntimeError("cupsfilter failed: %s"
+                           % proc.stderr.decode("utf-8", "replace").strip()[-300:])
+    return proc.stdout
+
+
+def print_direct(args, cfg, queue, files, netid):
+    """macOS: filter each file, wrap it in a popup block, send it over LPD."""
+    server = args.server or cfg.get("server")
+    if (cfg.get("prompt") or "never").strip().lower() == "always" and not args.netid:
+        netid = ask_netid_dialog(netid)
+        if netid is None:
+            print("Cancelled.")
+            return 0
+    if not valid_netid(netid or ""):
+        sys.stderr.write("error: no valid NetID; run 'dku-eprint set-netid <netid>'\n")
+        return 1
+    hostname = cfg.get("hostname") or socket.gethostname()
+    remote = dict((q, r) for q, _, r in QUEUE_PPDS)[queue]
+
+    with tempfile.TemporaryDirectory() as workdir:
+        for path in files:
+            title = args.title or ("stdin" if path == "-" else os.path.basename(path))
+            try:
+                data = filter_to_postscript(path, queue, args, title, workdir)
+                _, descriptors = pharos.query_queue(
+                    server, remote, netid, title, hostname=hostname,
+                    device_name=pharos.resolve_device_name(server))
+                for d in descriptors:
+                    if d.get("type") != "Guest":
+                        d["answer"] = netid
+                block = pharos.build_popup_block(
+                    hostname, netid, title, descriptors,
+                    application="dku-eprint", copies=1)
+                pharos.lpd_send(server, remote, netid, title, block + data,
+                                hostname=hostname)
+            except (OSError, RuntimeError, pharos.PopupError) as exc:
+                sys.stderr.write("error: %s: %s\n" % (path, exc))
+                return 1
+            print("Sent %s to %s." % (title, queue))
+    print("Release it with your DKUCard at any ePrint station.")
+    return 0
+
+
 def cmd_print(args):
     """Submit files to an ePrint queue through CUPS, by way of lp(1)."""
     cfg = load_config()
@@ -233,6 +331,9 @@ def cmd_print(args):
     if not netid and (cfg.get("prompt") or "never").strip().lower() != "always":
         sys.stderr.write("error: no NetID configured; run 'dku-eprint set-netid <netid>'\n")
         return 1
+
+    if DIRECT:
+        return print_direct(args, cfg, queue, files, netid)
 
     cmd = ["lp", "-d", queue]
     if args.title:

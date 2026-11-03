@@ -15,6 +15,7 @@
 set -euo pipefail
 
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[[ "$(uname -s)" == Darwin ]] && exec "$SRC_DIR/install-macos.sh" "$@"
 SHARE_DIR=/usr/share/dku-eprint
 PPD_DIR=/usr/share/ppd/dku-eprint
 CONF_DIR=/etc/dku-eprint

@@ -18,6 +18,7 @@ mainly useful for testing.
 
 import os
 import re
+import sys
 
 # A NetID ends up in the LPD control file, one field per line, so anything with
 # a newline in it could forge extra control lines.  Keep it to what a NetID
@@ -46,10 +47,17 @@ DEFAULTS = {
 
 
 def config_path():
-    """The file we would write to: the first existing one, else the system one."""
+    """The file we would write to: the first existing one, else the default.
+
+    The default is the system file on Linux, where the CUPS backend runs as lp
+    and cannot read a home directory.  macOS prints directly from the user's own
+    process, so the per-user file is the natural home and needs no root.
+    """
     for path in CONFIG_PATHS:
         if path and os.path.exists(path):
             return path
+    if sys.platform == "darwin":
+        return os.path.expanduser("~/.config/dku-eprint/eprint.conf")
     return "/etc/dku-eprint/eprint.conf"
 
 
