@@ -198,7 +198,7 @@ if [[ $MAKE_QUEUES -eq 1 ]]; then
         lpadmin -p "$name" -D "$name" -E \
                 -P "$PPD_DIR/$ppd" \
                 -o printer-is-shared=false \
-                -o PageSize=Letter \
+                -o PageSize=A4 \
                 -v "popup://$SERVER/$queue"
         echo "    $name"
     }

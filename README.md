@@ -119,6 +119,16 @@ your immediate subnet only.
 If the queues are missing entirely, `cupsd` was probably not running at install
 time: `sudo dku-eprint add-queues`.
 
+## If prints are cut off at the edge
+
+Older versions set the queues to Letter, but DKU stocks A4, so the left edge of
+each line (most visible on plain text files) falls off the page. Recreate the
+queues to switch them to A4:
+
+```sh
+sudo dku-eprint add-queues
+```
+
 ## How it works
 
 The DKU queues are ordinary LPD queues that expect a Pharos "popup block" in

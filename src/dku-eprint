@@ -32,7 +32,10 @@ QUEUE_DESCRIPTIONS = [
 ]
 SIDES = ["one-sided", "two-sided-long-edge", "two-sided-short-edge"]
 # Page sizes all three PPDs agree on; each Ricoh accepts fifty-odd more.
-COMMON_MEDIA = ["Letter", "Legal", "A4", "A5", "A6", "B5", "Executive"]
+# DKU stocks A4. A Letter page on A4 stock loses its left edge, which clips
+# plain text jobs (laid out 12pt from the edge) mid character.
+DEFAULT_MEDIA = "A4"
+COMMON_MEDIA = ["A4", "A5", "A6", "B5", "Letter", "Legal", "Executive"]
 
 # CUPS queue name -> (PPD filename, queue name on the print server)
 QUEUE_PPDS = [
@@ -134,7 +137,7 @@ def cmd_add_queues(args):
             "lpadmin", "-p", name, "-D", name, "-E",
             "-P", path,
             "-o", "printer-is-shared=false",
-            "-o", "PageSize=Letter",
+            "-o", "PageSize=%s" % DEFAULT_MEDIA,
             "-v", "popup://%s/%s" % (server, remote),
         ], capture_output=True)
         if proc.returncode != 0:
@@ -262,8 +265,8 @@ def filter_to_postscript(path, queue, args, title, workdir):
         opts.append("sides=%s" % args.sides)
     if args.pages:
         opts.append("page-ranges=%s" % args.pages)
-    if args.media:
-        opts.append("media=%s" % args.media)
+    # No queue default to fall back on here, and the Lexmark PPD says Letter.
+    opts.append("media=%s" % (args.media or DEFAULT_MEDIA))
     opts += args.option or []
     for opt in opts:
         cmd += ["-o", opt]
@@ -467,9 +470,9 @@ def main():
                    help="single or double sided: %s (default %s)"
                         % (", ".join(SIDES), SIDES[0]))
     p.add_argument("--media", metavar="SIZE",
-                   help="page size: %s (default Letter). The Ricohs take many "
+                   help="page size: %s (default %s). The Ricohs take many "
                         "more, A3 and 11x17 among them; the Lexmark does not"
-                        % ", ".join(COMMON_MEDIA))
+                        % (", ".join(COMMON_MEDIA), DEFAULT_MEDIA))
     p.add_argument("--pages", metavar="RANGE",
                    help="print only some pages, e.g. 1-4,7")
     p.add_argument("-t", "--title", metavar="NAME",

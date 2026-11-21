@@ -2,6 +2,10 @@
 %:
 	dh $@
 
+# The top-level Makefile is a convenience wrapper, not a build system: its
+# 'clean' target deletes debian/ and 'test' needs the source tree's layout.
+override_dh_auto_clean override_dh_auto_build override_dh_auto_test:
+
 override_dh_auto_install:
 	install -d -m 755 debian/dku-eprint/usr/share/dku-eprint
 	install -m 644 src/eprint_pharos.py debian/dku-eprint/usr/share/dku-eprint/
