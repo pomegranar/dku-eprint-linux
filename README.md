@@ -1,3 +1,5 @@
+> **Note:** macOS 26/27 users can use <a href="https://github.com/pomegranar/ezprint-dku">this app</a> if the official drivers won't work due to compatibility issues.
+
 # DKU ePrint for Linux
 
 Print to Duke Kunshan's ePrint service from Linux. DKU runs **Pharos Uniprint**,
