@@ -1,3 +1,9 @@
+dku-eprint (1.0.1-1) unstable; urgency=medium
+
+  * Default queues to A4, DKU stock; Letter clipped the left edge.
+
+ -- Anar Nyambayar <an301@duke.edu>  Sun, 22 Nov 2026 00:00:00 +0000
+
 dku-eprint (1.0.0-1) unstable; urgency=low
 
   * Initial release.

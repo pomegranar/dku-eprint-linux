@@ -1,6 +1,6 @@
 # Maintainer: Anar Nyambayar <an301@duke.edu>
 pkgname=dku-eprint
-pkgver=1.0.0
+pkgver=1.0.1
 pkgrel=1
 pkgdesc="Linux CUPS driver for the DKU ePrint (Pharos Uniprint) service"
 arch=('any')

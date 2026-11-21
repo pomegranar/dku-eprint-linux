@@ -1,5 +1,5 @@
 Name:           dku-eprint
-Version:        1.0.0
+Version:        1.0.1
 Release:        1%{?dist}
 Summary:        Linux CUPS driver for the DKU ePrint (Pharos Uniprint) service
 
@@ -94,5 +94,8 @@ fi
 %config(noreplace) %{_sysconfdir}/%{name}/eprint.conf
 
 %changelog
+* Sun Nov 22 2026 Anar Nyambayar <an301@duke.edu> - 1.0.1-1
+- Default queues to A4, DKU stock; Letter clipped the left edge
+
 * Sat Sep 19 2026 Anar Nyambayar <an301@duke.edu> - 1.0.0-1
 - Initial package

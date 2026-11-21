@@ -1,6 +1,6 @@
 # Convenience targets.  'make install' is the same thing install.sh does.
 NAME    := dku-eprint
-VERSION := 1.0.0
+VERSION := 1.0.1
 DIST    := $(NAME)-$(VERSION)
 
 .PHONY: help test install uninstall dist rpm deb arch clean
